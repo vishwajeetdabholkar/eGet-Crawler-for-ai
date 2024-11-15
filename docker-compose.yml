@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  eget:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: eget-scraper
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      - WORKERS=4
+      - MAX_CONCURRENT_SCRAPES=5
+      - TIMEOUT=30
+      - SECRET_KEY=your-secret-key-here
+      # Chrome specific settings
+      - PYTHONUNBUFFERED=1
+      - CHROME_BIN=/usr/bin/google-chrome
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    security_opt:
+      - seccomp=unconfined  # Needed for Chrome in container
+    shm_size: '2gb'  # Shared memory size for browser
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: eget-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    networks:
+      - eget-network
+    restart: unless-stopped
+
+networks:
+  eget-network:
+    driver: bridge
+
+volumes:
+  prometheus_data:
