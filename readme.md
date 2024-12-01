@@ -1,4 +1,4 @@
-# eGet - Advanced Web Scraping Framework
+# eGet - Advanced Web Scraping Framework for AI
 
 eGet is a high-performance, production-grade web scraping framework built with Python. 
 It provides a robust API for extracting content from web pages with features like dynamic content handling, structured data extraction, and extensive customization options.
