@@ -1,6 +1,9 @@
 # eGet - Advanced Web Scraping Framework
 
-eGet is a high-performance, production-grade web scraping framework built with Python. It provides a robust API for extracting content from web pages with features like dynamic content handling, structured data extraction, and extensive customization options.
+eGet is a high-performance, production-grade web scraping framework built with Python. 
+It provides a robust API for extracting content from web pages with features like dynamic content handling, structured data extraction, and extensive customization options.
+eGet transforms complex websites into AI-ready content with a single API call, handling everything from JavaScript-rendered pages to dynamic content while delivering clean, structured markdown that's perfect for RAG applications. 
+With its powerful crawling capabilities and intelligent content extraction, developers can effortlessly build comprehensive knowledge bases by turning any website into high-quality training data, making it an essential tool for teams building modern AI applications that need to understand and process web content at scale.
 
 ## 🚀 Features
 
@@ -41,19 +44,41 @@ eGet is a high-performance, production-grade web scraping framework built with P
 ```
 eGet/
 ├── api/
+│   ├── __init__.py
 │   └── v1/
-│       └── endpoints/     # API endpoint definitions
+│       └── endpoints/
+│           ├── crawler.py      # Crawler endpoint
+│           └── scraper.py      # Scraper endpoint
 ├── core/
-│   ├── config.py         # Configuration management
-│   └── exceptions.py     # Custom exception definitions
+│   ├── __init__.py
+│   ├── config.py              # Settings and configuration
+│   ├── exceptions.py          # Custom exception classes
+│   └── logging.py             # Logging configuration
 ├── models/
-│   ├── request.py        # Request models
-│   └── response.py       # Response models
+│   ├── __init__.py
+│   ├── crawler_request.py     # Crawler request models
+│   ├── crawler_response.py    # Crawler response models
+│   ├── request.py            # Scraper request models
+│   └── response.py           # Scraper response models
 ├── services/
-│   ├── crawler/          # Web crawling services
-│   ├── extractors/       # Content extraction services
-│   └── scraper/          # Core scraping logic
-└── main.py              # Application entry point
+│   ├── crawler/
+│   │   ├── __init__.py
+│   │   ├── crawler_service.py # Main crawler implementation
+│   │   ├── link_extractor.py  # URL extraction and validation
+│   │   └── queue_manager.py   # Crawl queue management
+│   ├── extractors/
+│   │   ├── structured_data.py # Structured data extraction
+│   │   └── validators.py      # Data validation
+│   └── scraper/
+│       ├── __init__.py
+│       └── scraper.py         # Main scraper implementation
+├── .env.template             # Environment template
+├── docker-compose.yml        # Docker composition
+├── Dockerfile               # Docker build instructions
+├── main.py                 # Application entry point
+├── prometheus.yml          # Prometheus configuration
+├── readme.md              # Project documentation
+└── requirements.txt       # Python dependencies
 ```
 
 ## 🚀 Getting Started
@@ -133,46 +158,141 @@ environment:
   - SECRET_KEY=your-secret-key-here
 ```
 
-## 📝 API Usage
+## 📝 API Usage Examples
 
-### Basic Scraping Request
+### Single Page Scraping
 
 ```python
 import requests
 
-url = "http://localhost:8000/api/v1/scrape"
-payload = {
-    "url": "https://example.com",
-    "formats": ["markdown", "html"],
-    "onlyMainContent": True,
-    "includeScreenshot": False,
-    "includeRawHtml": False
-}
+def scrape_page():
+    url = "http://localhost:8000/api/v1/scrape"
+    
+    # Configure scraping options
+    payload = {
+        "url": "https://example.com",
+        "formats": ["markdown", "html"],
+        "onlyMainContent": True,
+        "includeScreenshot": False,
+        "includeRawHtml": False,
+        "waitFor": 2000,  # Wait for dynamic content
+        "extract": {
+            "custom_config": {
+                "remove_ads": True,
+                "extract_tables": True
+            }
+        }
+    }
 
-response = requests.post(url, json=payload)
-print(response.json())
+    response = requests.post(url, json=payload)
+    result = response.json()
+    
+    if result["success"]:
+        # Access extracted content
+        markdown_content = result["data"]["markdown"]
+        html_content = result["data"]["html"]
+        metadata = result["data"]["metadata"]
+        structured_data = result["data"]["structured_data"]
+        
+        print(f"Title: {metadata.get('title')}")
+        print(f"Language: {metadata.get('language')}")
+        print("\nContent Preview:")
+        print(markdown_content[:500])
+        
+        # The extracted content is clean and ready for:
+        # 1. Creating embeddings for vector search
+        # 2. Feeding into LLMs as context
+        # 3. Knowledge graph construction
+        # 4. Document indexing
+        
+    return result
+
 ```
 
-### Content Crawling
+### Content Crawling for RAG
 
 ```python
-url = "http://localhost:8000/api/v1/crawl"
-payload = {
-    "url": "https://example.com",
-    "max_depth": 3,
-    "max_pages": 100,
-    "exclude_patterns": [r"\/api\/.*", r".*\.(jpg|jpeg|png|gif)$"],
-    "include_patterns": [r"\/blog\/.*"],
-    "respect_robots_txt": True
-}
+import requests
+from typing import List, Dict
 
-response = requests.post(url, json=payload)
-print(response.json())
+def crawl_site_for_rag() -> List[Dict]:
+    url = "http://localhost:8000/api/v1/crawl"
+    
+    # Configure crawling parameters
+    payload = {
+        "url": "https://example.com",
+        "max_depth": 2,  # How deep to crawl
+        "max_pages": 50,  # Maximum pages to process
+        "exclude_patterns": [
+            r"\/api\/.*",  # Skip API endpoints
+            r".*\.(jpg|jpeg|png|gif)$",  # Skip image files
+            r"\/tag\/.*",  # Skip tag pages
+            r"\/author\/.*"  # Skip author pages
+        ],
+        "include_patterns": [
+            r"\/blog\/.*",  # Focus on blog content
+            r"\/docs\/.*"   # And documentation
+        ],
+        "respect_robots_txt": True
+    }
+
+    response = requests.post(url, json=payload)
+    pages = response.json()
+    
+    # Process crawled pages for RAG
+    processed_documents = []
+    for page in pages:
+        doc = {
+            "url": page["url"],
+            "content": page["markdown"],
+            "metadata": {
+                "title": page.get("structured_data", {}).get("metaData", {}).get("title"),
+                "description": page.get("structured_data", {}).get("metaData", {}).get("description"),
+                "language": page.get("structured_data", {}).get("metaData", {}).get("language")
+            }
+        }
+        processed_documents.append(doc)
+        
+    return processed_documents
+
+# Usage in RAG pipeline
+documents = crawl_site_for_rag()
+# Now you can:
+# 1. Create embeddings for each document
+# 2. Store in vector database
+# 3. Use for retrieval in RAG applications
+```
+
+### Response Structure
+
+The scraper returns clean, structured data ready for AI processing:
+
+```python
+{
+    "success": True,
+    "data": {
+        "markdown": "# Main Title\n\nClean, processed content...",
+        "html": "<div>Clean HTML content...</div>",
+        "metadata": {
+            "title": "Page Title",
+            "description": "Page description",
+            "language": "en",
+            "sourceURL": "https://example.com",
+            "statusCode": 200
+        },
+        "structured_data": {
+            "jsonLd": [...],  # JSON-LD data
+            "openGraph": {...},  # OpenGraph metadata
+            "twitterCard": {...},  # Twitter Card data
+            "metaData": {...}  # Additional metadata
+        }
+    }
+}
 ```
 
 ## 🔍 Monitoring
 
-The API exposes Prometheus metrics at `/metrics` endpoint:
+The API exposes Prometheus metrics at `/metrics`:
 
 - `scraper_requests_total`: Total scrape requests
 - `scraper_errors_total`: Error count
@@ -250,13 +370,17 @@ pre-commit install
 ## 🔍 Roadmap
 
 - [ ] Add comprehensive test suite
-- [ ] Implement proxy support
-- [ ] Add caching mechanism
-- [ ] Support custom JavaScript injection
-- [ ] Improve content extraction algorithms
+- [ ] Implement proxy support with rotation capabilities
+- [ ] Add response caching mechanism
+- [ ] Enhance JavaScript injection capabilities with user-defined scripts
 - [ ] Add support for sitemap-based crawling
-- [ ] Implement rate limiting per domain
-- [ ] Add support for custom extraction rules
+- [ ] Enhance per-domain rate limiting
+- [ ] Add cookie management and session handling
+- [ ] Implement custom response processors
+- [ ] Add support for headless browser alternatives
+- [ ] Implement distributed crawling capabilities
+- [ ] Add export capabilities to various formats
+- [ ] Enhance error recovery and resumption mechanisms
 
 ## 📄 License
 
@@ -267,5 +391,3 @@ This project is licensed under the Apache License - see the LICENSE file for det
 - FastAPI for the amazing web framework
 - Selenium team for browser automation
 - Beautiful Soup for HTML parsing
-- All contributors who help improve this project
-
