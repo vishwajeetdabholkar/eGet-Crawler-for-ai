@@ -125,7 +125,6 @@ DEBUG=True
 LOG_LEVEL=INFO
 PORT=8000
 WORKERS=1
-SECRET_KEY=your-secret-key-here
 ```
 
 ### 🐳 Docker Setup
