@@ -1,3 +1,4 @@
+from datetime import timedelta
 from typing import Dict, Any, List, Optional, Set
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -17,7 +18,10 @@ from functools import wraps
 from concurrent.futures import ThreadPoolExecutor
 import time
 from core.exceptions import BrowserError
+from core.config import get_settings
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from services.cache import cache_service
+from services.cache.cache_service import CacheService
 from services.extractors.structured_data import StructuredDataExtractor
 
 # Metrics for monitoring
@@ -25,6 +29,8 @@ from prometheus_client import Counter, Histogram
 SCRAPE_REQUESTS = Counter('scraper_requests_total', 'Total number of scrape requests')
 SCRAPE_ERRORS = Counter('scraper_errors_total', 'Total number of scrape errors')
 SCRAPE_DURATION = Histogram('scraper_duration_seconds', 'Time spent scraping URLs')
+
+settings = get_settings()
 
 def with_retry(max_retries: int = 3, delay: float = 1.0):
     """Decorator for retry logic"""
@@ -326,14 +332,17 @@ class WebScraper:
         self.content_extractor = ContentExtractor()
         self.structured_data_extractor = StructuredDataExtractor()
         self.semaphore = asyncio.Semaphore(max_concurrent)
-        
+        self.cache_service = None
         # Keep track of browsers in use
         self.active_browsers = set()
     
     @classmethod
-    async def create(cls, max_concurrent: int = 5) -> 'WebScraper':
-        """Factory method for creating WebScraper instance"""
+    async def create(cls, max_concurrent: int = 5, cache_service: Optional[CacheService] = None) -> 'WebScraper':
+        """Factory method for creating WebScraper instance with optional cache service"""
         instance = cls(max_concurrent=max_concurrent)
+        instance.cache_service = cache_service  # Set the cache service
+        if instance.cache_service:
+            await instance.cache_service.connect()
         return instance
     
     async def _get_page_content(self, url: str, options: Dict[str, Any]) -> Dict[str, Any]:
@@ -418,46 +427,74 @@ class WebScraper:
             await self.browser_manager.release_browser(browser)
  
     async def scrape(self, url: str, options: Dict[str, Any]) -> Dict[str, Any]:
-        """Main scraping method with proper async handling"""
+        """Main scraping method with caching"""
         SCRAPE_REQUESTS.inc()
         
-        async with self.semaphore:
-            try:
-                with SCRAPE_DURATION.time():
-                    # Get and process page content
-                    page_data = await self._get_page_content(url, options)
-                    processed_data = await self._process_page_data(page_data, options, url)
-                    
+        try:
+            # Check cache first if caching is enabled
+            if self.cache_service and not options.get('bypass_cache'):
+                cached_result = await self.cache_service.get_cached_result(url, options)
+                if cached_result:
                     return {
                         'success': True,
-                        'data': processed_data
+                        'data': cached_result,
+                        'cached': True
+                    }
+            
+            # If not cached or cache bypassed, proceed with scraping
+            async with self.semaphore:
+                try:
+                    with SCRAPE_DURATION.time():
+                        # Get and process page content
+                        page_data = await self._get_page_content(url, options)
+                        processed_data = await self._process_page_data(page_data, options, url)
+                        
+                        # Cache the result if caching is enabled
+                        if self.cache_service and not options.get('bypass_cache'):
+                            cache_ttl = options.get('cache_ttl', getattr(settings, 'CACHE_TTL', 86400))  # Default to 24 hours
+                            await self.cache_service.cache_result(
+                                url, 
+                                options, 
+                                processed_data,
+                                ttl=timedelta(seconds=cache_ttl)
+                            )
+                        
+                        return {
+                            'success': True,
+                            'data': processed_data,
+                            'cached': False
+                        }
+                        
+                except Exception as e:
+                    SCRAPE_ERRORS.inc()
+                    logger.error(f"Scraping error for {url}: {str(e)}")
+                    return {
+                        'success': False,
+                        'data': {
+                            'markdown': None,
+                            'html': None,
+                            'rawHtml': None,
+                            'screenshot': None,
+                            'links': None,
+                            'actions': None,
+                            'metadata': {
+                                'title': None,
+                                'description': None,
+                                'language': None,
+                                'sourceURL': url,
+                                'statusCode': 500,
+                                'error': str(e)
+                            },
+                            'llm_extraction': None,
+                            'warning': str(e),
+                            'structured_data': None
+                        }
                     }
                     
-            except Exception as e:
-                SCRAPE_ERRORS.inc()
-                logger.error(f"Scraping error for {url}: {str(e)}")
-                return {
-                    'success': False,
-                    'data': {
-                        'markdown': None,
-                        'html': None,
-                        'rawHtml': None,
-                        'screenshot': None,
-                        'links': None,
-                        'actions': None,
-                        'metadata': {
-                            'title': None,
-                            'description': None,
-                            'language': None,
-                            'sourceURL': url,
-                            'statusCode': 500,
-                            'error': str(e)
-                        },
-                        'llm_extraction': None,
-                        'warning': str(e),
-                        'structured_data': None
-                    }
-                }
+        except Exception as e:
+            logger.error(f"Unexpected error in scrape method: {str(e)}")
+            SCRAPE_ERRORS.inc()
+            raise
 
     async def _process_page_data(self, page_data: Dict[str, Any], 
                                options: Dict[str, Any], url: str) -> Dict[str, Any]:

@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  eget:
+    volumes:
+      - .:/app
+    environment:
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      - WORKERS=1
+      - MAX_CONCURRENT_SCRAPES=2
+      - TIMEOUT=60
+      - SECRET_KEY=dev-secret-key
+      - RELOAD=true
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  redis:
+    ports:
+      - "6379:6379"  # Expose port in dev only
+
+  prometheus:
+    ports:
+      - "9090:9090"  # Expose port in dev only

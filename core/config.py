@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     )
     SCREENSHOT_QUALITY: int = 80
 
+    # Cache Settings
+    REDIS_URL: str = "redis://redis:6379"
+    CACHE_TTL: int = 86400  # 24 hours in seconds
+    CACHE_ENABLED: bool = True
+
     class Config:
         env_file = ".env"
         case_sensitive = True
