@@ -61,6 +61,9 @@ eGet/
 │   ├── request.py            # Scraper request models
 │   └── response.py           # Scraper response models
 ├── services/
+│   ├── cache/                # Redis caching service
+│   │   ├── __init__.py
+│   │   └── cache_service.py  # Cache implementation
 │   ├── crawler/
 │   │   ├── __init__.py
 │   │   ├── crawler_service.py # Main crawler implementation
@@ -74,6 +77,8 @@ eGet/
 │       └── scraper.py         # Main scraper implementation
 ├── .env.template             # Environment template
 ├── docker-compose.yml        # Docker composition
+├── docker-compose.dev.yml   # Docker composition for development
+├── docker-compose.prod.yml  # Docker composition for production
 ├── Dockerfile               # Docker build instructions
 ├── main.py                 # Application entry point
 ├── prometheus.yml          # Prometheus configuration
@@ -129,32 +134,51 @@ WORKERS=1
 
 ### 🐳 Docker Setup
 
-1. Build the Docker image:
-```bash
-docker build -t eget-scraper .
-```
+We provide two environments for running eGet:
 
-2. Run with Docker Compose:
+1. Build the Docker image for Development Environment:
 ```bash
-docker-compose up -d
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 ```
+    This will start:
 
-This will start:
-- eGet API service on port 8000
-- Prometheus monitoring on port 9090
+    eGet API service on port 8000 (with hot-reload)
+    Redis cache on port 6379
+    Prometheus monitoring on port 9090
+
+2. Build the Docker image for Production Environment:
+```bash
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+    This starts production services with:
+
+    - Optimized resource limits
+    - Proper restart policies
+    - Security configurations
+    - Redis cache
+    - Prometheus monitoring
 
 #### Docker Environment Variables
 
-Configure the service through environment variables in `docker-compose.yml`:
+Configure the service through environment variables:
 
 ```yaml
 environment:
+  # API Settings
   - DEBUG=false
   - LOG_LEVEL=INFO
   - WORKERS=4
   - MAX_CONCURRENT_SCRAPES=5
   - TIMEOUT=30
-  - SECRET_KEY=your-secret-key-here
+
+  # Cache Settings
+  - CACHE_ENABLED=true
+  - CACHE_TTL=86400  # Cache duration in seconds (24 hours)
+  - REDIS_URL=redis://redis:6379
+
+  # Chrome Settings
+  - PYTHONUNBUFFERED=1
+  - CHROME_BIN=/usr/bin/google-chrome
 ```
 
 ## 📝 API Usage Examples
