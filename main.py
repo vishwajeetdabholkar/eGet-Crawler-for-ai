@@ -12,6 +12,7 @@ from prometheus_client import make_asgi_app
 from core.config import settings
 from core.exceptions import ScraperException, ValidationError
 from models.request import ScrapeRequest
+from services.cache.cache_service import CacheService
 from services.scraper.scraper import WebScraper
 from services.crawler.crawler_service import CrawlerService 
 from api.v1.endpoints import crawler, scraper  
@@ -26,17 +27,26 @@ async def lifespan(app: FastAPI):
         # Startup
         logger.info("Initializing application...")
         
-        # Initialize resources
+        # Initialize cache service
+        cache_service = CacheService(settings.REDIS_URL)
+        await cache_service.connect()
+        
+        # Initialize resources with cache service
         logger.info("Initializing scraper...")
-        app.state.scraper = WebScraper(max_concurrent=settings.CONCURRENT_SCRAPES)
+        app.state.scraper = await WebScraper.create(
+            max_concurrent=settings.CONCURRENT_SCRAPES,
+            cache_service=cache_service
+        )
+        
         logger.info("Initializing crawler...")
-        app.state.crawler = CrawlerService(max_concurrent=settings.CONCURRENT_SCRAPES) 
+        app.state.crawler = CrawlerService(max_concurrent=settings.CONCURRENT_SCRAPES)
         
         yield
         
         # Shutdown
         logger.info("Shutting down application...")
         await app.state.scraper.cleanup()
+        
     except Exception as e:
         logger.exception(f"Application lifecycle error: {str(e)}")
         raise

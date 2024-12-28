@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  eget:
+    restart: unless-stopped
+    environment:
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      - WORKERS=4
+      - MAX_CONCURRENT_SCRAPES=5
+      - TIMEOUT=30
+      - SECRET_KEY=${SECRET_KEY}
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  redis:
+    restart: unless-stopped
+
+  prometheus:
+    restart: unless-stopped
