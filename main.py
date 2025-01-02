@@ -15,7 +15,7 @@ from models.request import ScrapeRequest
 from services.cache.cache_service import CacheService
 from services.scraper.scraper import WebScraper
 from services.crawler.crawler_service import CrawlerService 
-from api.v1.endpoints import crawler, scraper  
+from api.v1.endpoints import crawler, scraper , chunker 
 
 # Prometheus metrics endpoint
 metrics_app = make_asgi_app()
@@ -79,6 +79,12 @@ app.include_router(
     scraper.router,
     prefix="/api/v1",
     tags=["scraper"] 
+)
+
+app.include_router(
+    chunker.router,
+    prefix="/api/v1",
+    tags=["chunker"]
 )
 
 app.add_middleware(
