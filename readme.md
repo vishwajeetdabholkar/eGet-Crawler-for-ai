@@ -80,8 +80,17 @@ eGet/
 │   │   ├── semantic_chunker.py # Enhanced chunking implementation
 │   │   └── markdown_parser.py  # Advanced markdown parsing
 │   ├── converters/            # Document conversion services
-│   │   ├── conversion_service.py # Main conversion orchestrator
-│   │   └── markdown_converter.py # Document to markdown converter
+|   |    ├── __init__.py
+|   |    ├── base_converter.py          # Base converter abstract class
+|   |    ├── document_structure.py      # Document structure management
+|   |    ├── file_utils.py             # File handling utilities
+|   |    ├── converter_factory.py      # Converter instantiation factory
+|   |    ├── conversion_service.py     # Main conversion orchestrator
+|   |    └── converters/               # Individual converter implementations
+|   |        ├── __init__.py
+|   |        ├── pdf_converter.py      # PDF conversion implementation
+|   |        ├── docx_converter.py     # DOCX conversion implementation
+|   |        └── xlsx_converter.py     # XLSX conversion implementation
 │   ├── extractors/
 │   │   ├── structured_data.py # Enhanced structured data extraction
 │   │   └── validators.py      # Extended data validation
