@@ -45,7 +45,6 @@ async def convert_file(
     - PDF (.pdf)
     - Word (.docx)
     - Excel (.xlsx)
-    - PowerPoint (.pptx)
     
     Maximum file size: 5MB
     """

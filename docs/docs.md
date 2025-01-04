@@ -224,6 +224,74 @@ Response:
 }
 ```
 
+#### 4. Document Converter Endpoint
+```http
+POST /api/v1/convert/file
+```
+
+Request:
+
+Method: POST
+Content-Type: multipart/form-data
+Body:
+
+`file: Document file (PDF/DOCX/XLSX)`
+
+Response:
+```json
+{
+  "success": boolean,
+  "markdown": "# Document Title\n\nConverted content...",
+  "metadata": {
+    "filename": "example.pdf",
+    "size_bytes": 1048576,
+    "file_type": "pdf",
+    "pages": 5,
+    "images_count": 3,
+    "tables_count": 2,
+    "equations_count": 0
+  },
+  "warnings": [
+    {
+      "code": "WARNING",
+      "message": "Image quality reduced for optimization"
+    }
+  ]
+}```
+
+Features:
+ -Converts documents to clean, structured markdown
+ -Preserves document formatting and layout
+ -Handles tables, images, and complex layouts
+ -Supports PDF, DOCX, and XLSX formats
+ -Includes comprehensive metadata
+ -Built-in caching for improved performance
+
+Currently supported file types:
+ -PDF (.pdf)
+ -Word Documents (.docx)
+ -Excel Spreadsheets (.xlsx)
+
+```python
+import requests
+
+def convert_document():
+    url = "http://localhost:8000/api/v1/convert/file"
+    
+    # Open file in binary mode
+    with open("document.pdf", "rb") as file:
+        files = {"file": file}
+        response = requests.post(url, files=files)
+    
+    result = response.json()
+    
+    if result["success"]:
+        print(f"Converted content: {result['markdown'][:200]}")
+        print(f"Pages: {result['metadata']['pages']}")
+        print(f"Tables found: {result['metadata']['tables_count']}")
+        print(f"Images found: {result['metadata']['images_count']}")
+```
+
 ## Configuration
 
 ### Environment Variables
