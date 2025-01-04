@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y \
     libnss3 \
     libgbm1 \
     libasound2 \
+    libmagic1 \
+    file \
     && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
     && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list \
     && apt-get update \

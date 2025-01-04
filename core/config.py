@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import List, Optional
+from typing import Any, List, Optional
 from functools import lru_cache
 import os
 from dotenv import load_dotenv

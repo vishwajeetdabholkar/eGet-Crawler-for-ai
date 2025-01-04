@@ -48,42 +48,54 @@ eGet/
 │   └── v1/
 │       └── endpoints/
 │           ├── crawler.py      # Crawler endpoint
-│           └── scraper.py      # Scraper endpoint
+│           ├── scraper.py      # Scraper endpoint
+│           ├── chunker.py      # Semantic chunking endpoint
+│           └── converter.py    # File conversion endpoint
 ├── core/
 │   ├── __init__.py
-│   ├── config.py              # Settings and configuration
-│   ├── exceptions.py          # Custom exception classes
+│   ├── config.py              # Enhanced settings and configuration
+│   ├── exceptions.py          # Extended custom exception classes
 │   └── logging.py             # Logging configuration
 ├── models/
 │   ├── __init__.py
 │   ├── crawler_request.py     # Crawler request models
 │   ├── crawler_response.py    # Crawler response models
-│   ├── request.py            # Scraper request models
-│   └── response.py           # Scraper response models
+│   ├── request.py             # Scraper request models
+│   ├── response.py            # Scraper response models
+│   ├── chunk_request.py       # Chunk request models
+│   ├── chunk_response.py      # Chunk response models
+│   └── file_conversion_models.py # File conversion models
 ├── services/
-│   ├── cache/                # Redis caching service
+│   ├── cache/
 │   │   ├── __init__.py
-│   │   └── cache_service.py  # Cache implementation
+│   │   └── cache_service.py   # Enhanced cache implementation
 │   ├── crawler/
 │   │   ├── __init__.py
 │   │   ├── crawler_service.py # Main crawler implementation
-│   │   ├── link_extractor.py  # URL extraction and validation
-│   │   └── queue_manager.py   # Crawl queue management
+│   │   ├── link_extractor.py  # Enhanced URL extraction
+│   │   └── queue_manager.py   # Advanced queue management
+│   ├── chunker/
+│   │   ├── __init__.py
+│   │   ├── chunk_service.py   # Chunk service implementation
+│   │   ├── semantic_chunker.py # Enhanced chunking implementation
+│   │   └── markdown_parser.py  # Advanced markdown parsing
+│   ├── converters/            # Document conversion services
+│   │   ├── conversion_service.py # Main conversion orchestrator
+│   │   └── markdown_converter.py # Document to markdown converter
 │   ├── extractors/
-│   │   ├── structured_data.py # Structured data extraction
-│   │   └── validators.py      # Data validation
+│   │   ├── structured_data.py # Enhanced structured data extraction
+│   │   └── validators.py      # Extended data validation
 │   └── scraper/
 │       ├── __init__.py
-│       └── scraper.py         # Main scraper implementation
-├── .env.template             # Environment template
-├── docker-compose.yml        # Docker composition
-├── docker-compose.dev.yml   # Docker composition for development
-├── docker-compose.prod.yml  # Docker composition for production
-├── Dockerfile               # Docker build instructions
-├── main.py                 # Application entry point
-├── prometheus.yml          # Prometheus configuration
-├── readme.md              # Project documentation
-└── requirements.txt       # Python dependencies
+│       └── scraper.py         # Enhanced scraper implementation
+├── .env.template              # Extended environment template
+├── docker-compose.yml         # Base Docker composition
+├── docker-compose.dev.yml     # Development Docker composition
+├── docker-compose.prod.yml    # Production Docker composition
+├── Dockerfile                 # Enhanced Docker build
+├── main.py                    # Enhanced application entry
+├── prometheus.yml            # Prometheus monitoring config
+└── requirements.txt          # Updated Python dependencies
 ```
 
 ## 🚀 Getting Started
