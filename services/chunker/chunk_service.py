@@ -4,11 +4,12 @@ from loguru import logger
 from models.chunk_request import ChunkRequest
 from models.chunk_response import ChunkResponse, Chunk, ChunkMetadata, ChunkHierarchy
 from services.scraper.scraper import WebScraper
-from .markdown_parser import MarkdownParser
+from .semantic_chunker import SemanticChunker  # Changed from MarkdownParser
 
 class ChunkService:
     def __init__(self, scraper: WebScraper):
         self.scraper = scraper
+        logger.info("Initialized ChunkService")
 
     async def process_url(self, request: ChunkRequest) -> ChunkResponse:
         start_time = time.time()
@@ -25,6 +26,7 @@ class ChunkService:
             )
 
             if not scrape_result["success"]:
+                logger.error("Failed to scrape URL")
                 return ChunkResponse(
                     success=False,
                     markdown="",
@@ -33,17 +35,19 @@ class ChunkService:
                 )
 
             markdown_content = scrape_result["data"]["markdown"]
-            logger.debug(f"Processing markdown content length: {len(markdown_content)}")
+            logger.info(f"Processing markdown content length: {len(markdown_content)}")
 
-            # Parse markdown into chunks
-            parser = MarkdownParser(
+            # Initialize chunker
+            chunker = SemanticChunker(
                 max_chunk_size=request.max_chunk_size,
                 min_chunk_size=request.min_chunk_size
             )
             
-            chunks_data = parser.parse(markdown_content)
+            # Generate chunks
+            chunks_data = chunker.chunk_markdown(markdown_content)
+            logger.info(f"Generated {len(chunks_data)} chunks")
             
-            # Convert to Pydantic models explicitly
+            # Convert to Pydantic models
             chunks: List[Chunk] = []
             for chunk_data in chunks_data:
                 try:
@@ -77,9 +81,11 @@ class ChunkService:
                     logger.error(f"Problematic chunk data: {chunk_data}")
                     continue
 
-            # Calculate stats
+            processing_time = time.time() - start_time
             total_words = sum(chunk.metadata.word_count for chunk in chunks)
             avg_chunk_size = total_words / len(chunks) if chunks else 0
+            
+            logger.info(f"Processed {len(chunks)} chunks in {processing_time:.2f}s")
             
             return ChunkResponse(
                 success=True,
@@ -88,7 +94,7 @@ class ChunkService:
                 stats={
                     "total_chunks": len(chunks),
                     "avg_chunk_size": avg_chunk_size,
-                    "processing_time": time.time() - start_time
+                    "processing_time": processing_time
                 }
             )
 
