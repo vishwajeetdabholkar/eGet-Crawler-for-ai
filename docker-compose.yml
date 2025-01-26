@@ -5,6 +5,7 @@ services:
     build: 
       context: .
       dockerfile: Dockerfile
+    platform: linux/amd64
     container_name: eget-scraper
     ports:
       - "8000:8000"
@@ -31,6 +32,8 @@ services:
 
   prometheus:
     image: prom/prometheus:latest
+    platform: linux/amd64
+    container_name: eget-prometheus
     ports:
       - "9090:9090"
     volumes:
