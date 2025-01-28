@@ -2,7 +2,7 @@ import streamlit as st
 import json
 import requests
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from openai import OpenAI
 import chromadb
 from chromadb.utils import embedding_functions
@@ -10,288 +10,306 @@ import logging
 from pathlib import Path
 import os
 import time
+import hashlib
+from dataclasses import dataclass
+from urllib.parse import urlparse
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('app.log'),
-        logging.StreamHandler()
-    ]
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
 
-# Configure your OpenAI API key here
-OPENAI_API_KEY = ""  # Add your API key here
+@dataclass
+class URLContent:
+    """Data class to store URL content and metadata"""
+    url: str
+    content: str
+    title: str
+    timestamp: str
+    domain: str
+    collection_id: str
 
-# Ensure data directories exist
-Path("data/chroma").mkdir(parents=True, exist_ok=True)
-
-def chunk_text(text: str, chunk_size: int = 4000) -> List[str]:
-    """Split text into smaller chunks"""
-    words = text.split()
-    chunks = []
-    current_chunk = []
-    current_size = 0
-    
-    for word in words:
-        current_size += len(word) + 1  # +1 for space
-        if current_size > chunk_size:
-            chunks.append(' '.join(current_chunk))
-            current_chunk = [word]
-            current_size = len(word) + 1
-        else:
-            current_chunk.append(word)
-            
-    if current_chunk:
-        chunks.append(' '.join(current_chunk))
-    
-    return chunks
+    @staticmethod
+    def generate_collection_id(url: str) -> str:
+        """Generate a unique collection ID for a URL"""
+        domain = urlparse(url).netloc
+        hash_object = hashlib.md5(url.encode())
+        return f"{domain}_{hash_object.hexdigest()[:8]}"
 
 class ContentManager:
     def __init__(self):
-        try:
-            # Initialize ChromaDB
-            self.client = chromadb.PersistentClient(path="data/chroma")
-            
-            # Initialize OpenAI embeddings
-            self.embedding_function = embedding_functions.OpenAIEmbeddingFunction(
-                api_key=OPENAI_API_KEY,
-                model_name="text-embedding-ada-002"
-            )
-            
-            # Get or create collection
-            self.collection = self.client.get_or_create_collection(
-                name="web_content",
-                embedding_function=self.embedding_function
-            )
-            
-            # Initialize OpenAI client
-            self.openai_client = OpenAI(api_key=OPENAI_API_KEY)
-            
-            logger.info("ContentManager initialized successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize ContentManager: {e}", exc_info=True)
-            raise
+        """Initialize the content manager with dynamic collection support"""
+        self.client = chromadb.PersistentClient(path="data/chroma")
+        self.embedding_function = embedding_functions.OpenAIEmbeddingFunction(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            model_name="text-embedding-ada-002"
+        )
+        self.openai_client = OpenAI()
+        self.active_collections = {}
+        self.load_existing_collections()
 
-    def scrape_url(self, url: str) -> dict:
-        """Scrape content from URL using eGet API"""
+    def load_existing_collections(self):
+        """Load existing collections from ChromaDB"""
         try:
+            collections = self.client.list_collections()
+            for collection in collections:
+                self.active_collections[collection.name] = collection
+            logger.info(f"Loaded {len(collections)} existing collections")
+        except Exception as e:
+            logger.error(f"Error loading collections: {e}")
+
+    def get_or_create_collection(self, url: str) -> tuple[chromadb.Collection, str]:
+        """Get existing collection or create new one for URL"""
+        collection_id = URLContent.generate_collection_id(url)
+        
+        if collection_id not in self.active_collections:
+            collection = self.client.create_collection(
+                name=collection_id,
+                embedding_function=self.embedding_function,
+                metadata={"url": url, "created_at": datetime.now().isoformat()}
+            )
+            self.active_collections[collection_id] = collection
+            logger.info(f"Created new collection for {url}")
+        
+        return self.active_collections[collection_id], collection_id
+
+    def scrape_and_process_url(self, url: str) -> URLContent:
+        """Scrape URL content and prepare for storage"""
+        try:
+            # Scrape content using eGet
             response = requests.post(
                 "http://localhost:8000/api/v1/scrape",
-                json={
-                    "url": url,
-                    "onlyMainContent": True,
-                    "formats": ["markdown"]
-                },
+                json={"url": url, "onlyMainContent": True, "formats": ["markdown"]},
                 timeout=30
             )
             response.raise_for_status()
-            data = response.json()
             
-            if not data.get("success"):
-                raise Exception(data.get("error", "Unknown error"))
-                
-            return data["data"]
+            data = response.json()["data"]
             
-        except requests.RequestException as e:
-            logger.error(f"Failed to scrape {url}: {e}", exc_info=True)
-            raise Exception(f"Failed to scrape {url}: {str(e)}")
-
-    def add_content(self, url: str, content: dict) -> None:
-        """Add content to ChromaDB"""
-        try:
-            # Chunk the markdown content
-            text = content["markdown"]
-            chunks = chunk_text(text)
-            
-            # Add each chunk as a separate document
-            for i, chunk in enumerate(chunks):
-                try:
-                    self.collection.add(
-                        documents=[chunk],
-                        metadatas=[{
-                            "url": url,
-                            "title": content.get("metadata", {}).get("title", ""),
-                            "timestamp": datetime.now().isoformat(),
-                            "chunk": i
-                        }],
-                        ids=[f"{hash(url + datetime.now().isoformat())}_{i}"]
-                    )
-                except Exception as chunk_error:
-                    logger.warning(f"Failed to add chunk {i} for {url}: {chunk_error}")
-                    continue
-                    
-            logger.info(f"Content added for {url}")
-            
+            return URLContent(
+                url=url,
+                content=data["markdown"],
+                title=data.get("metadata", {}).get("title", "Unknown Title"),
+                timestamp=datetime.now().isoformat(),
+                domain=urlparse(url).netloc,
+                collection_id=URLContent.generate_collection_id(url)
+            )
         except Exception as e:
-            logger.error(f"Failed to add content for {url}: {e}", exc_info=True)
+            logger.error(f"Error scraping {url}: {e}")
             raise
 
-    def get_relevant_content(self, query: str, n_results: int = 3) -> str:
-        """Get relevant content for query"""
+    def chunk_text(self, text: str, chunk_size: int = 4000) -> List[str]:
+        """Split text into semantic chunks"""
+        paragraphs = text.split('\n\n')
+        chunks = []
+        current_chunk = []
+        current_size = 0
+        
+        for paragraph in paragraphs:
+            paragraph_size = len(paragraph)
+            
+            if current_size + paragraph_size > chunk_size:
+                if current_chunk:
+                    chunks.append('\n\n'.join(current_chunk))
+                current_chunk = [paragraph]
+                current_size = paragraph_size
+            else:
+                current_chunk.append(paragraph)
+                current_size += paragraph_size
+        
+        if current_chunk:
+            chunks.append('\n\n'.join(current_chunk))
+        
+        return chunks
+
+    def add_url_content(self, content: URLContent) -> None:
+        """Add URL content to its collection"""
         try:
-            if self.collection.count() == 0:
-                return ""
+            collection, _ = self.get_or_create_collection(content.url)
+            chunks = self.chunk_text(content.content)
+            
+            # Add chunks with metadata
+            for i, chunk in enumerate(chunks):
+                collection.add(
+                    documents=[chunk],
+                    metadatas=[{
+                        "url": content.url,
+                        "title": content.title,
+                        "timestamp": content.timestamp,
+                        "chunk_index": i,
+                        "domain": content.domain
+                    }],
+                    ids=[f"{content.collection_id}_{i}"]
+                )
+            
+            logger.info(f"Added {len(chunks)} chunks from {content.url}")
+            
+        except Exception as e:
+            logger.error(f"Error adding content from {content.url}: {e}")
+            raise
+
+    def query_collection(self, collection_id: str, query: str, n_results: int = 3) -> List[Dict]:
+        """Query specific collection for relevant content"""
+        try:
+            collection = self.active_collections.get(collection_id)
+            if not collection:
+                raise ValueError(f"Collection {collection_id} not found")
                 
-            results = self.collection.query(
+            results = collection.query(
                 query_texts=[query],
-                n_results=min(n_results, self.collection.count())
+                n_results=n_results
             )
             
-            if not results["documents"][0]:
-                return ""
-                
-            # Combine context with source information
-            context = []
+            context_entries = []
             for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
-                context.append(f"Content from {meta['url']}:\n{doc}")
-            
-            return "\n\n".join(context)
+                context_entries.append({
+                    "content": doc,
+                    "metadata": meta
+                })
+                
+            return context_entries
             
         except Exception as e:
-            logger.error(f"Failed to get relevant content: {e}", exc_info=True)
+            logger.error(f"Error querying collection {collection_id}: {e}")
             raise
 
-    def get_chat_response(self, query: str, context: str) -> str:
-        """Get chat response using context"""
+    def get_chat_response(self, query: str, context_entries: List[Dict]) -> str:
+        """Generate chat response using context"""
         try:
-            # Truncate context if too long
-            context_chunks = chunk_text(context, chunk_size=6000)  # Leave room for system and user message
-            truncated_context = context_chunks[0] if context_chunks else ""
+            # Format context for the prompt
+            formatted_context = "\n\n".join([
+                f"From {entry['metadata']['url']} ({entry['metadata']['title']}):\n{entry['content']}"
+                for entry in context_entries
+            ])
             
             response = self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4",
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a helpful assistant that answers questions based on the provided web content. If the context doesn't contain relevant information, say 'I don't know'."
+                        "content": """You are a helpful assistant that provides accurate information based on the given web content.
+                        Always cite your sources when providing information, and if information isn't available in the context, say so."""
                     },
                     {
                         "role": "user",
-                        "content": f"Context:\n{truncated_context}\n\nQuestion: {query}"
+                        "content": f"Context:\n{formatted_context}\n\nQuestion: {query}"
                     }
                 ],
                 temperature=0.7
             )
+            
             return response.choices[0].message.content
             
         except Exception as e:
-            logger.error(f"Failed to get chat response: {e}", exc_info=True)
+            logger.error(f"Error generating chat response: {e}")
             raise
 
 def initialize_state():
     """Initialize Streamlit session state"""
     if 'content_manager' not in st.session_state:
-        try:
-            st.session_state.content_manager = ContentManager()
-        except Exception as e:
-            st.error(f"Failed to initialize: {str(e)}")
-            return False
-    
+        st.session_state.content_manager = ContentManager()
+    if 'active_url' not in st.session_state:
+        st.session_state.active_url = None
     if 'chat_history' not in st.session_state:
-        st.session_state.chat_history = []
-        
-    if 'processed_urls' not in st.session_state:
-        st.session_state.processed_urls = set()
-    
-    return True
+        st.session_state.chat_history = {}
 
 def main():
-    st.title("🌐 eGet Based RAG APP")
+    st.title("🌐 Dynamic Web Content Assistant")
     
-    if not OPENAI_API_KEY:
-        st.error("Please set your OpenAI API key at the top of the script")
-        return
-        
-    if not initialize_state():
-        return
+    initialize_state()
 
-    # Sidebar
+    # Sidebar for URL input and management
     with st.sidebar:
-        st.header("📊 Statistics")
-        total_docs = st.session_state.content_manager.collection.count()
-        st.metric("Total Documents", total_docs)
+        st.header("📚 Knowledge Base")
         
-        if st.session_state.processed_urls:
-            st.subheader("Processed URLs")
-            for url in st.session_state.processed_urls:
-                st.text(url)
+        # URL Input
+        url_input = st.text_input("Enter URL to analyze:")
+        if st.button("Process URL", key="process_url"):
+            if url_input:
+                with st.spinner("Processing URL..."):
+                    try:
+                        # Scrape and process content
+                        content = st.session_state.content_manager.scrape_and_process_url(url_input)
+                        st.session_state.content_manager.add_url_content(content)
+                        st.session_state.active_url = content.collection_id
+                        
+                        if content.collection_id not in st.session_state.chat_history:
+                            st.session_state.chat_history[content.collection_id] = []
+                        
+                        st.success(f"Successfully processed: {content.title}")
+                        
+                    except Exception as e:
+                        st.error(f"Error processing URL: {str(e)}")
         
-        st.subheader("🔧 Debug Options")
-        show_context = st.checkbox("Show Context")
-        show_time = st.checkbox("Show Response Time")
+        # Show available collections
+        st.subheader("Available Sources")
+        collections = st.session_state.content_manager.active_collections
+        
+        if collections:
+            selected_collection = st.radio(
+                "Select source to chat with:",
+                options=list(collections.keys()),
+                format_func=lambda x: collections[x].metadata.get("url", x)
+            )
+            st.session_state.active_url = selected_collection
+        else:
+            st.info("No sources available. Add a URL to begin.")
 
-    # URL Input
-    st.subheader("🌐 Add Web Content")
-    urls_input = st.text_area(
-        "Enter URLs (one per line):",
-        help="Enter URLs to scrape and add to the knowledge base"
-    )
-    
-    if st.button("Process URLs"):
-        if urls_input:
-            urls = [url.strip() for url in urls_input.split('\n') if url.strip()]
-            with st.spinner("Processing URLs..."):
+    # Main chat interface
+    if st.session_state.active_url:
+        st.subheader(f"💬 Chat with: {collections[st.session_state.active_url].metadata.get('url')}")
+        
+        # Display chat history
+        history = st.session_state.chat_history.get(st.session_state.active_url, [])
+        for message in history:
+            with st.chat_message(message["role"]):
+                st.write(message["content"])
+                if message.get("context"):
+                    with st.expander("📚 View Sources"):
+                        for entry in message["context"]:
+                            st.markdown(f"""
+                            <div style="margin: 10px 0; padding: 10px; border-left: 3px solid #0066cc;">
+                                <small style="color: #666;">
+                                    Source: {entry['metadata']['url']}
+                                    <br>Title: {entry['metadata']['title']}
+                                </small>
+                                <div style="margin-top: 5px;">{entry['content']}</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+        
+        # Chat input
+        if query := st.chat_input("Ask about the content..."):
+            # Add user message
+            history.append({"role": "user", "content": query})
+            
+            with st.spinner("Thinking..."):
                 try:
-                    for url in urls:
-                        content = st.session_state.content_manager.scrape_url(url)
-                        st.session_state.content_manager.add_content(url, content)
-                        st.session_state.processed_urls.add(url)
-                    st.success("URLs processed successfully!")
+                    # Get relevant context
+                    context = st.session_state.content_manager.query_collection(
+                        st.session_state.active_url,
+                        query
+                    )
+                    
+                    # Get response
+                    response = st.session_state.content_manager.get_chat_response(query, context)
+                    
+                    # Add assistant message
+                    history.append({
+                        "role": "assistant",
+                        "content": response,
+                        "context": context
+                    })
+                    
+                    st.session_state.chat_history[st.session_state.active_url] = history
+                    st.rerun()
                     
                 except Exception as e:
-                    st.error(f"Error processing URLs: {str(e)}")
-
-    # Chat Interface
-    st.markdown("---")
-    st.subheader("💬 Chat")
-    
-    # Display chat history
-    for message in st.session_state.chat_history:
-        with st.chat_message(message["role"]):
-            st.write(message["content"])
-            if show_context and message.get("context"):
-                with st.expander("Context Used"):
-                    st.text(message["context"])
-            if show_time and message.get("response_time"):
-                st.caption(f"Response time: {message['response_time']:.2f}s")
-
-    # Chat input
-    if query := st.chat_input("Ask about the web content"):
-        # Add user message
-        st.session_state.chat_history.append({
-            "role": "user",
-            "content": query
-        })
-
-        # Get response
-        with st.spinner("Thinking..."):
-            try:
-                start_time = time.time()
-                
-                # Get relevant content
-                context = st.session_state.content_manager.get_relevant_content(query)
-                
-                # Get response
-                response = st.session_state.content_manager.get_chat_response(
-                    query, context
-                )
-                
-                # Add assistant message
-                st.session_state.chat_history.append({
-                    "role": "assistant",
-                    "content": response,
-                    "context": context,
-                    "response_time": time.time() - start_time
-                })
-                
-                st.rerun()
-                
-            except Exception as e:
-                st.error(f"Error: {str(e)}")
+                    st.error(f"Error: {str(e)}")
+    else:
+        st.info("👈 Enter a URL in the sidebar to begin chatting!")
 
 if __name__ == "__main__":
     main()
