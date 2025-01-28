@@ -1,3 +1,3 @@
-from .scraper import WebScraper, BrowserManager, ContentExtractor
+from .scraper import WebScraper, BrowserContext, ContentExtractor
 
-__all__ = ['WebScraper', 'BrowserManager', 'ContentExtractor']
+__all__ = ['WebScraper', 'BrowserContext', 'ContentExtractor']
