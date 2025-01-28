@@ -54,13 +54,25 @@ class ContentManager:
     def load_existing_collections(self):
         """Load existing collections from ChromaDB"""
         try:
-            collections = self.client.list_collections()
-            for collection in collections:
-                self.active_collections[collection.name] = collection
-            logger.info(f"Loaded {len(collections)} existing collections")
+            # In v0.6.0, list_collections returns only names
+            collection_names = self.client.list_collections()
+            for name in collection_names:
+                try:
+                    # Get each collection by name
+                    collection = self.client.get_collection(
+                        name=name,
+                        embedding_function=self.embedding_function
+                    )
+                    self.active_collections[name] = collection
+                except Exception as collection_error:
+                    logger.error(f"Error loading collection {name}: {collection_error}")
+                    continue
+            
+            logger.info(f"Loaded {len(self.active_collections)} existing collections")
         except Exception as e:
-            logger.error(f"Error loading collections: {e}")
-
+            logger.error(f"Error listing collections: {e}")
+            # Initialize empty but don't fail
+            self.active_collections = {}
     def get_or_create_collection(self, url: str) -> tuple[chromadb.Collection, str]:
         """Get existing collection or create new one for URL"""
         collection_id = URLContent.generate_collection_id(url)
@@ -249,12 +261,30 @@ def main():
         collections = st.session_state.content_manager.active_collections
         
         if collections:
-            selected_collection = st.radio(
-                "Select source to chat with:",
-                options=list(collections.keys()),
-                format_func=lambda x: collections[x].metadata.get("url", x)
-            )
-            st.session_state.active_url = selected_collection
+            # Create a list of tuples with (collection_id, display_name)
+            collection_options = []
+            for coll_id, collection in collections.items():
+                try:
+                    # Get collection metadata safely
+                    display_name = collection.metadata.get("url", coll_id) if collection.metadata else coll_id
+                    collection_options.append((coll_id, display_name))
+                except Exception as e:
+                    logger.warning(f"Error getting metadata for collection {coll_id}: {e}")
+                    collection_options.append((coll_id, coll_id))
+            
+            if collection_options:
+                # Sort by display name for better UX
+                collection_options.sort(key=lambda x: x[1])
+                
+                # Create radio options
+                selected_collection = st.radio(
+                    "Select source to chat with:",
+                    options=[coll_id for coll_id, _ in collection_options],
+                    format_func=lambda x: dict(collection_options)[x]
+                )
+                st.session_state.active_url = selected_collection
+            else:
+                st.info("No valid sources available. Add a URL to begin.")
         else:
             st.info("No sources available. Add a URL to begin.")
 
