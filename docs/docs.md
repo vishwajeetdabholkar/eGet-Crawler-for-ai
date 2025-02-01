@@ -1,313 +1,492 @@
-# eGet - The Web Scraper API Documentation
+# eRAG - Advanced Web Scraping Framework for AI
 
-## Overview
+## Table of Contents
+1. [Introduction](#introduction)
+2. [Features](#features)
+3. [Architecture](#architecture)
+4. [Installation](#installation)
+5. [API Reference](#api-reference)
+6. [Configuration](#configuration)
+7. [Usage Examples](#usage-examples)
+8. [Deployment](#deployment)
+9. [Monitoring](#monitoring)
+10. [Contributing](#contributing)
 
-The Web Scraper API is a production-grade service that enables automated web page content extraction and processing. It uses Selenium with Chrome WebDriver for rendering JavaScript-heavy pages and provides advanced features like screenshots, dynamic content handling, and customizable extraction options.
+## Introduction
 
-## Base URL
+eRAG is a production-grade web scraping framework designed specifically for AI applications. It provides a robust API for extracting clean, structured content from web pages, with features tailored for Retrieval Augmented Generation (RAG) and other AI-driven use cases.
 
-```
-http://localhost:8000
-```
-
-## Authentication
-
-The API uses JWT (JSON Web Token) Bearer authentication.
-
-### Headers
-
-```
-Authorization: Bearer <your_jwt_token>
-```
-
-## Endpoints
-
-### Health Check
-
-```http
-GET /health
-```
-
-Returns the current health status of the API.
-
-#### Response
-
-```json
-{
-    "status": "healthy",
-    "timestamp": 1699456789.123
-}
-```
-
-### Root
-
-```http
-GET /
-```
-
-Returns basic API information and available endpoints.
-
-#### Response
-
-```json
-{
-    "name": "Web Scraper API",
-    "version": "1.0.0",
-    "description": "Production-grade web scraper API",
-    "docs_url": "/docs",
-    "health_check": "/health"
-}
-```
-
-### Scrape URL
-
-```http
-POST /scrape
-```
-
-Scrapes the specified URL and returns processed content based on the provided options.
-
-#### Request Body
-
-| Field | Type | Description | Required | Default |
-|-------|------|-------------|----------|---------|
-| url | string | The URL to scrape (must be a valid HTTP/HTTPS URL) | Yes | - |
-| formats | array[string] | Desired output formats | Yes | - |
-| onlyMainContent | boolean | Extract only the main content area | No | true |
-| includeTags | array[string] | HTML tags to include in extraction | No | null |
-| excludeTags | array[string] | HTML tags to exclude from extraction | No | null |
-| headers | object | Custom HTTP headers for the request | No | null |
-| waitFor | integer | Time to wait for dynamic content (in milliseconds) | No | null |
-| mobile | boolean | Emulate mobile device | No | false |
-| skipTlsVerification | boolean | Skip TLS/SSL verification | No | false |
-| timeout | integer | Request timeout in milliseconds | No | 30000 |
-| extract | object | Custom extraction configuration | No | null |
-| actions | array[object] | Custom actions to perform before extraction | No | null |
-| location | object | Geolocation settings | No | null |
-
-#### Example Request
-
-```json
-{
-    "url": "https://example.com",
-    "formats": ["html", "markdown"],
-    "onlyMainContent": true,
-    "headers": {
-        "User-Agent": "Custom User Agent"
-    },
-    "waitFor": 5000,
-    "timeout": 30000,
-    "actions": [
-        {
-            "type": "wait",
-            "milliseconds": 2000
-        },
-        {
-            "type": "click",
-            "selector": "#load-more"
-        }
-    ]
-}
-```
-
-#### Response
-
-```json
-{
-    "success": true,
-    "data": {
-        "markdown": "# Page Title\n\nExtracted content...",
-        "html": "<div>Extracted HTML content...</div>",
-        "rawHtml": "<html>Full page HTML...</html>",
-        "screenshot": "base64_encoded_screenshot_data",
-        "links": [
-            {
-                "href": "https://example.com/link1",
-                "text": "Link Text",
-                "rel": "nofollow"
-            }
-        ],
-        "metadata": {
-            "title": "Page Title",
-            "description": "Page description",
-            "language": "en",
-            "sourceURL": "https://example.com",
-            "statusCode": 200
-        }
-    }
-}
-```
-
-#### Error Response
-
-```json
-{
-    "success": false,
-    "data": {
-        "metadata": {
-            "sourceURL": "https://example.com",
-            "statusCode": 500,
-            "error": "Error message description"
-        }
-    }
-}
-```
-
-## Response Codes
-
-| Code | Description |
-|------|-------------|
-| 200 | Successful scraping operation |
-| 400 | Bad request (invalid parameters) |
-| 401 | Unauthorized (invalid or missing token) |
-| 422 | Validation error (invalid request body) |
-| 429 | Too many requests |
-| 500 | Internal server error |
-| 504 | Gateway timeout |
+The framework excels at handling JavaScript-rendered pages, dynamic content, and complex web applications while delivering clean, structured markdown output that's perfect for RAG applications. With its intelligent content extraction and crawling capabilities, eRAG helps developers build comprehensive knowledge bases by efficiently transforming web content into high-quality training data.
 
 ## Features
 
-### Screenshot Capture
-The API automatically captures a screenshot of the rendered page, returned as a base64-encoded string in the response.
+### Core Capabilities
+- **Dynamic Content Handling**
+  - Full JavaScript rendering support
+  - Configurable wait conditions for dynamic content
+  - Custom page interaction support
+  - Intelligent main content detection
 
-### Dynamic Content Handling
-- Configurable wait times for JavaScript-rendered content
-- Custom actions (click, wait, scroll) before content extraction
-- Selector-based waiting for specific elements
+- **Content Processing**
+  - Smart main content detection and extraction
+  - Markdown conversion with structure preservation
+  - HTML cleaning and standardization
+  - Structured data extraction (JSON-LD, OpenGraph, Twitter Cards)
+  - Semantic chunking for optimal RAG processing
 
-### Content Processing
-- Main content extraction
-- HTML cleaning and formatting
-- Markdown conversion
-- Metadata extraction
-- Link extraction
-- Multiple output formats
+- **Performance & Reliability**
+  - Browser resource pooling
+  - Concurrent request handling
+  - Redis-based caching
+  - Rate limiting and retry mechanisms
+  - Prometheus metrics integration
 
-### Performance & Reliability
-- Concurrent scraping support
-- Automatic retries with exponential backoff
-- Configurable timeouts
-- Browser resource management
-- Prometheus metrics integration
+- **Crawling Capabilities**
+  - Configurable crawl depth and scope
+  - Pattern-based URL filtering
+  - robots.txt compliance
+  - Link discovery and validation
+  - Distributed crawling support
 
-## Metrics
+### Additional Features
+- Screenshot capture
+- Comprehensive metadata extraction
+- Custom JavaScript execution
+- Proxy support
+- Cookie and session handling
+- Export capabilities
 
-The API exposes Prometheus metrics at `/metrics` endpoint:
+## Architecture
 
-- `scraper_requests_total`: Total number of scrape requests
-- `scraper_errors_total`: Total number of scrape errors
-- `scraper_duration_seconds`: Time spent scraping URLs
+The project follows a modular architecture with clear separation of concerns:
 
-## Rate Limiting
-
-The API implements concurrent request limiting through:
-- Maximum concurrent scrapes: 5 (default)
-- Maximum browser instances: 3 (default)
-
-## Environment Configuration
-
-The API can be configured through environment variables:
-
-```env
-DEBUG=False
-PORT=8000
-WORKERS=4
-LOG_LEVEL=INFO
-SECRET_KEY=your-secret-key-here
-MAX_WORKERS=3
-TIMEOUT=30000
-MAX_RETRIES=3
-CONCURRENT_SCRAPES=5
+```
+eRAG/
+├── api/                  # API endpoints
+├── core/                # Core functionality
+├── models/              # Data models
+└── services/           # Business logic services
+    ├── cache/          # Caching service
+    ├── crawler/        # Crawling service
+    ├── chunker/        # Content chunking
+    ├── extractors/     # Data extractors
+    └── scraper/        # Web scraping
 ```
 
-## Error Handling
+### Key Components
 
-The API implements comprehensive error handling:
+1. **API Layer**
+   - FastAPI-based REST API
+   - Request validation
+   - Error handling
+   - Response formatting
 
-### Validation Errors
+2. **Core Services**
+   - WebScraper: Main scraping engine
+   - CrawlerService: Web crawling orchestration
+   - ChunkService: Semantic content chunking
+   - CacheService: Redis-based caching
+
+3. **Support Services**
+   - BrowserManager: Selenium browser pool
+   - ContentExtractor: Content processing
+   - StructuredDataExtractor: Metadata extraction
+   - LinkExtractor: URL processing
+
+## API Reference
+
+### Endpoints
+
+#### 1. Scraper Endpoint
+```http
+POST /api/v1/scrape
+```
+
+Request Body:
 ```json
 {
-    "error": {
-        "code": "VALIDATION_ERROR",
-        "message": "Validation error occurred",
-        "details": [
-            {
-                "loc": ["body", "url"],
-                "msg": "invalid or missing URL scheme",
-                "type": "value_error.url.scheme"
-            }
-        ]
-    }
+  "url": "https://example.com",
+  "formats": ["markdown", "html"],
+  "onlyMainContent": true,
+  "includeTags": ["article", "section"],
+  "excludeTags": ["nav", "footer"],
+  "waitFor": 2000,
+  "includeRawHtml": false,
+  "includeScreenshot": false
 }
 ```
 
-### Scraper Errors
+Response:
 ```json
 {
-    "error": {
-        "code": "SCRAPER_ERROR",
-        "message": "Failed to scrape URL",
-        "details": "Timeout while loading page"
+  "success": true,
+  "data": {
+    "markdown": "# Title\n\nContent...",
+    "html": "<div>Cleaned content...</div>",
+    "metadata": {
+      "title": "Page Title",
+      "description": "Page description",
+      "language": "en",
+      "sourceURL": "https://example.com",
+      "statusCode": 200
+    },
+    "structured_data": {
+      "jsonLd": [...],
+      "openGraph": {...},
+      "twitterCard": {...},
+      "metaData": {...}
     }
+  }
 }
 ```
 
-## Best Practices
+#### 2. Crawler Endpoint
+```http
+POST /api/v1/crawl
+```
 
-1. **Timeouts**: Set appropriate timeouts based on the target website's performance
-2. **Retries**: The API automatically retries failed requests, but consider implementing client-side retry logic for reliability
-3. **Resource Management**: Monitor concurrent requests to avoid overwhelming target servers
-4. **Error Handling**: Implement proper error handling in your client code
-5. **Content Extraction**: Use `onlyMainContent: true` for cleaner results when possible
+Request Body:
+```json
+{
+  "url": "https://example.com",
+  "max_depth": 2,
+  "max_pages": 50,
+  "exclude_patterns": [
+    "\\/api\\/.*",
+    ".*\\.(jpg|jpeg|png|gif)$"
+  ],
+  "include_patterns": [
+    "\\/blog\\/.*",
+    "\\/docs\\/.*"
+  ],
+  "respect_robots_txt": true
+}
+```
 
-## SDK Examples
+Response:
+```json
+[
+  {
+    "url": "https://example.com/page1",
+    "markdown": "Content in markdown...",
+    "structured_data": {
+      "jsonLd": [...],
+      "openGraph": {...},
+      "twitterCard": {...},
+      "metaData": {...}
+    }
+  }
+]
+```
 
-### Python
+#### 3. Chunker Endpoint
+```http
+POST /api/v1/chunk
+```
+
+Request Body:
+```json
+{
+  "url": "https://example.com",
+  "max_chunk_size": 512,
+  "min_chunk_size": 128
+}
+```
+
+Response:
+```json
+{
+  "success": true,
+  "markdown": "Original markdown content...",
+  "chunks": [
+    {
+      "id": "uuid",
+      "content": "Chunk content...",
+      "type": "paragraph",
+      "hierarchy": {
+        "parent_id": "parent-uuid",
+        "level": 1,
+        "path": ["root", "section1"]
+      },
+      "metadata": {
+        "heading": "Section Heading",
+        "word_count": 100,
+        "position": 1,
+        "type": "paragraph"
+      }
+    }
+  ],
+  "stats": {
+    "total_chunks": 10,
+    "avg_chunk_size": 256,
+    "processing_time": 1.5
+  }
+}
+```
+
+#### 4. Document Converter Endpoint
+```http
+POST /api/v1/convert/file
+```
+
+Request:
+
+Method: POST
+Content-Type: multipart/form-data
+Body:
+
+`file: Document file (PDF/DOCX/XLSX)`
+
+Response:
+```json
+{
+  "success": boolean,
+  "markdown": "# Document Title\n\nConverted content...",
+  "metadata": {
+    "filename": "example.pdf",
+    "size_bytes": 1048576,
+    "file_type": "pdf",
+    "pages": 5,
+    "images_count": 3,
+    "tables_count": 2,
+    "equations_count": 0
+  },
+  "warnings": [
+    {
+      "code": "WARNING",
+      "message": "Image quality reduced for optimization"
+    }
+  ]
+}```
+
+Features:
+ -Converts documents to clean, structured markdown
+ -Preserves document formatting and layout
+ -Handles tables, images, and complex layouts
+ -Supports PDF, DOCX, and XLSX formats
+ -Includes comprehensive metadata
+ -Built-in caching for improved performance
+
+Currently supported file types:
+ -PDF (.pdf)
+ -Word Documents (.docx)
+ -Excel Spreadsheets (.xlsx)
 
 ```python
 import requests
-import json
 
-def scrape_url(url, token):
-    headers = {
-        'Authorization': f'Bearer {token}',
-        'Content-Type': 'application/json'
-    }
+def convert_document():
+    url = "http://localhost:8000/api/v1/convert/file"
     
-    payload = {
-        'url': url,
-        'formats': ['markdown', 'html'],
-        'onlyMainContent': True,
-        'timeout': 30000
-    }
+    # Open file in binary mode
+    with open("document.pdf", "rb") as file:
+        files = {"file": file}
+        response = requests.post(url, files=files)
     
-    response = requests.post(
-        'http://localhost:8000/scrape',
-        headers=headers,
-        json=payload
-    )
+    result = response.json()
     
-    return response.json()
+    if result["success"]:
+        print(f"Converted content: {result['markdown'][:200]}")
+        print(f"Pages: {result['metadata']['pages']}")
+        print(f"Tables found: {result['metadata']['tables_count']}")
+        print(f"Images found: {result['metadata']['images_count']}")
 ```
 
-### JavaScript
+## Configuration
 
-```javascript
-async function scrapeUrl(url, token) {
-    const response = await fetch('http://localhost:8000/scrape', {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            url: url,
-            formats: ['markdown', 'html'],
-            onlyMainContent: true,
-            timeout: 30000
-        })
-    });
+### Environment Variables
+
+```env
+# API Configuration
+DEBUG=false
+LOG_LEVEL=INFO
+PORT=8000
+WORKERS=4
+
+# Security
+SECRET_KEY=your-secure-key-here
+API_KEY=your-api-key-here
+
+# Scraper Settings
+MAX_CONCURRENT_SCRAPES=5
+TIMEOUT=30
+SCREENSHOT_QUALITY=80
+
+# Redis Configuration
+REDIS_URL=redis://redis:6379
+CACHE_TTL=86400
+CACHE_ENABLED=true
+
+# Rate Limiting
+RATE_LIMIT_ENABLED=false
+RATE_LIMIT_REQUESTS=100
+RATE_LIMIT_PERIOD=3600
+
+# Monitoring
+PROMETHEUS_ENABLED=true
+```
+
+## Usage Examples
+
+### Basic Scraping
+```python
+import requests
+
+def scrape_page():
+    url = "http://localhost:8000/api/v1/scrape"
+    payload = {
+        "url": "https://example.com",
+        "formats": ["markdown", "html"],
+        "onlyMainContent": True,
+        "waitFor": 2000
+    }
     
-    return await response.json();
+    response = requests.post(url, json=payload)
+    result = response.json()
+    
+    if result["success"]:
+        markdown_content = result["data"]["markdown"]
+        metadata = result["data"]["metadata"]
+        print(f"Title: {metadata['title']}")
+        print(f"Content: {markdown_content[:500]}")
+```
+
+### Crawling with Filtering
+```python
+def crawl_site():
+    url = "http://localhost:8000/api/v1/crawl"
+    payload = {
+        "url": "https://example.com",
+        "max_depth": 2,
+        "max_pages": 50,
+        "exclude_patterns": [
+            r"\/api\/.*",
+            r".*\.(jpg|jpeg|png|gif)$"
+        ],
+        "include_patterns": [
+            r"\/blog\/.*",
+            r"\/docs\/.*"
+        ]
+    }
+    
+    response = requests.post(url, json=payload)
+    pages = response.json()
+    
+    for page in pages:
+        print(f"URL: {page['url']}")
+        print(f"Content: {page['markdown'][:200]}")
+```
+
+### Semantic Chunking
+```python
+def chunk_content():
+    url = "http://localhost:8000/api/v1/chunk"
+    payload = {
+        "url": "https://example.com",
+        "max_chunk_size": 512,
+        "min_chunk_size": 128
+    }
+    
+    response = requests.post(url, json=payload)
+    result = response.json()
+    
+    if result["success"]:
+        for chunk in result["chunks"]:
+            print(f"Chunk {chunk['metadata']['position']}:")
+            print(f"Type: {chunk['type']}")
+            print(f"Content: {chunk['content'][:200]}")
+            print("-" * 80)
+```
+
+## Deployment
+
+### Docker Deployment
+
+1. Development Environment:
+```bash
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+```
+
+2. Production Environment:
+```bash
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+### Resource Requirements
+
+Minimum recommended specifications:
+- CPU: 2 cores
+- RAM: 4GB
+- Storage: 20GB
+
+### Security Considerations
+
+1. API Security:
+   - Use API key authentication
+   - Enable rate limiting
+   - Set up CORS properly
+   - Use HTTPS in production
+
+2. Browser Security:
+   - Run in sandboxed mode
+   - Disable unnecessary features
+   - Regular security updates
+
+## Monitoring
+
+### Prometheus Metrics
+
+Available metrics:
+- `scraper_requests_total`: Total number of scrape requests
+- `scraper_errors_total`: Number of scraping errors
+- `scraper_duration_seconds`: Time spent scraping URLs
+
+Access metrics at: `http://localhost:9090`
+
+### Health Checks
+
+Endpoint: `/health`
+```json
+{
+  "status": "healthy",
+  "timestamp": 1641116400
 }
 ```
+
+## Contributing
+
+### Development Setup
+
+1. Fork `https://github.com/vishwajeetdabholkar/eGet-Crawler-for-ai.git` and then clone the repository:
+```bash
+git clone https://github.com/yourusername/eGet-Crawler-for-ai.git
+cd eGet-Crawler-for-ai
+```
+
+2. Create virtual environment:
+```bash
+python -m venv venv
+source venv/bin/activate  # or .\venv\Scripts\activate on Windows
+```
+
+3. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+### Code Style
+- Follow PEP 8 guidelines
+- Use meaningful variable names
+- Include docstrings for all functions
+- Add type hints
+- Write unit tests for new features
+
+### Pull Request Process
+1. Create feature branch
+2. Add tests
+3. Update documentation
+4. Submit PR with detailed description
+
+## License
+
+This project is licensed under the Apache License - see the LICENSE file for details.

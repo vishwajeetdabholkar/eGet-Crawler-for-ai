@@ -124,3 +124,26 @@ class TimeoutError(ScraperException):
                 "timeout_seconds": timeout
             }
         )
+
+class FileConversionException(ScraperException):
+    """Raised when file conversion fails"""
+    def __init__(self, reason: str):
+        super().__init__(
+            message=f"File conversion failed: {reason}",
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            error_code="FILE_CONVERSION_ERROR",
+            details={"reason": reason}
+        )
+
+class FileSizeExceededException(ScraperException):
+    """Raised when file size exceeds limit"""
+    def __init__(self, size_mb: float, limit_mb: int):
+        super().__init__(
+            message=f"File size ({size_mb:.1f}MB) exceeds limit of {limit_mb}MB",
+            status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+            error_code="FILE_SIZE_EXCEEDED",
+            details={
+                "size_mb": size_mb,
+                "limit_mb": limit_mb
+            }
+        )

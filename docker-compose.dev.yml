@@ -4,6 +4,10 @@ services:
   eget:
     volumes:
       - .:/app
+      # Exclude cookbook directory by mounting an empty volume over it
+      - /app/cookbook
+      # Keep the logs directory mounted
+      - ./logs:/app/logs
     environment:
       - DEBUG=true
       - LOG_LEVEL=DEBUG

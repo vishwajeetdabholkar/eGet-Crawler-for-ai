@@ -48,37 +48,63 @@ eGet/
 │   └── v1/
 │       └── endpoints/
 │           ├── crawler.py      # Crawler endpoint
-│           └── scraper.py      # Scraper endpoint
+│           ├── scraper.py      # Scraper endpoint
+│           ├── chunker.py      # Semantic chunking endpoint
+│           └── converter.py    # File conversion endpoint
 ├── core/
 │   ├── __init__.py
-│   ├── config.py              # Settings and configuration
-│   ├── exceptions.py          # Custom exception classes
+│   ├── config.py              # Enhanced settings and configuration
+│   ├── exceptions.py          # Extended custom exception classes
 │   └── logging.py             # Logging configuration
 ├── models/
 │   ├── __init__.py
 │   ├── crawler_request.py     # Crawler request models
 │   ├── crawler_response.py    # Crawler response models
-│   ├── request.py            # Scraper request models
-│   └── response.py           # Scraper response models
+│   ├── request.py             # Scraper request models
+│   ├── response.py            # Scraper response models
+│   ├── chunk_request.py       # Chunk request models
+│   ├── chunk_response.py      # Chunk response models
+│   └── file_conversion_models.py # File conversion models
 ├── services/
+│   ├── cache/
+│   │   ├── __init__.py
+│   │   └── cache_service.py   # Enhanced cache implementation
 │   ├── crawler/
 │   │   ├── __init__.py
 │   │   ├── crawler_service.py # Main crawler implementation
-│   │   ├── link_extractor.py  # URL extraction and validation
-│   │   └── queue_manager.py   # Crawl queue management
+│   │   ├── link_extractor.py  # Enhanced URL extraction
+│   │   └── queue_manager.py   # Advanced queue management
+│   ├── chunker/
+│   │   ├── __init__.py
+│   │   ├── chunk_service.py   # Chunk service implementation
+│   │   ├── semantic_chunker.py # Enhanced chunking implementation
+│   │   └── markdown_parser.py  # Advanced markdown parsing
+│   ├── converters/            # Document conversion services
+|   |    ├── __init__.py
+|   |    ├── base_converter.py          # Base converter abstract class
+|   |    ├── document_structure.py      # Document structure management
+|   |    ├── file_utils.py             # File handling utilities
+|   |    ├── converter_factory.py      # Converter instantiation factory
+|   |    ├── conversion_service.py     # Main conversion orchestrator
+|   |    └── converters/               # Individual converter implementations
+|   |        ├── __init__.py
+|   |        ├── pdf_converter.py      # PDF conversion implementation
+|   |        ├── docx_converter.py     # DOCX conversion implementation
+|   |        └── xlsx_converter.py     # XLSX conversion implementation
 │   ├── extractors/
-│   │   ├── structured_data.py # Structured data extraction
-│   │   └── validators.py      # Data validation
+│   │   ├── structured_data.py # Enhanced structured data extraction
+│   │   └── validators.py      # Extended data validation
 │   └── scraper/
 │       ├── __init__.py
-│       └── scraper.py         # Main scraper implementation
-├── .env.template             # Environment template
-├── docker-compose.yml        # Docker composition
-├── Dockerfile               # Docker build instructions
-├── main.py                 # Application entry point
-├── prometheus.yml          # Prometheus configuration
-├── readme.md              # Project documentation
-└── requirements.txt       # Python dependencies
+│       └── scraper.py         # Enhanced scraper implementation
+├── .env.template              # Extended environment template
+├── docker-compose.yml         # Base Docker composition
+├── docker-compose.dev.yml     # Development Docker composition
+├── docker-compose.prod.yml    # Production Docker composition
+├── Dockerfile                 # Enhanced Docker build
+├── main.py                    # Enhanced application entry
+├── prometheus.yml            # Prometheus monitoring config
+└── requirements.txt          # Updated Python dependencies
 ```
 
 ## 🚀 Getting Started
@@ -129,32 +155,51 @@ WORKERS=1
 
 ### 🐳 Docker Setup
 
-1. Build the Docker image:
-```bash
-docker build -t eget-scraper .
-```
+We provide two environments for running eGet:
 
-2. Run with Docker Compose:
+1. Build the Docker image for Development Environment:
 ```bash
-docker-compose up -d
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 ```
+    This will start:
 
-This will start:
-- eGet API service on port 8000
-- Prometheus monitoring on port 9090
+    eGet API service on port 8000 (with hot-reload)
+    Redis cache on port 6379
+    Prometheus monitoring on port 9090
+
+2. Build the Docker image for Production Environment:
+```bash
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+    This starts production services with:
+
+    - Optimized resource limits
+    - Proper restart policies
+    - Security configurations
+    - Redis cache
+    - Prometheus monitoring
 
 #### Docker Environment Variables
 
-Configure the service through environment variables in `docker-compose.yml`:
+Configure the service through environment variables:
 
 ```yaml
 environment:
+  # API Settings
   - DEBUG=false
   - LOG_LEVEL=INFO
   - WORKERS=4
   - MAX_CONCURRENT_SCRAPES=5
   - TIMEOUT=30
-  - SECRET_KEY=your-secret-key-here
+
+  # Cache Settings
+  - CACHE_ENABLED=true
+  - CACHE_TTL=86400  # Cache duration in seconds (24 hours)
+  - REDIS_URL=redis://redis:6379
+
+  # Chrome Settings
+  - PYTHONUNBUFFERED=1
+  - CHROME_BIN=/usr/bin/google-chrome
 ```
 
 ## 📝 API Usage Examples
