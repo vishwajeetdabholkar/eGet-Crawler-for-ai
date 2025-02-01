@@ -53,8 +53,8 @@ A production-grade web application that demonstrates the power of eGet Scraper A
 ### Installation
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/web-content-assistant.git
-cd web-content-assistant
+git clone https://github.com/vishwajeetdabholkar/eGet-Crawler-for-ai/tree/main/
+cd eGet-Crawler-for-ai/cookbook/web_content_assistant
 
 # Create virtual environment
 python -m venv venv
@@ -69,7 +69,7 @@ export OPENAI_API_KEY=your_api_key
 
 ### Running the Application
 ```bash
-# Start eGet Scraper API (follow eGet documentation)
+# Start eGet Scraper API (follow eGet documentation) : https://github.com/vishwajeetdabholkar/eGet-Crawler-for-ai/blob/main/readme.md#local-installation
 # Start Ollama (if using local models)
 ollama serve
 
