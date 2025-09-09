@@ -26,7 +26,7 @@ class ChunkService:
 
     def _clean_markdown(self, markdown_content: str) -> str:
         """
-        Clean and normalize markdown content before chunking.
+        Clean and normalize markdown content before chunking with optimized processing.
         
         Args:
             markdown_content: Raw markdown content from scraping
@@ -35,20 +35,19 @@ class ChunkService:
             Cleaned markdown content
         """
         try:
-            # Remove excessive whitespace
-            cleaned = re.sub(r'\s+', ' ', markdown_content)
+            # Pre-compile regex patterns for better performance
+            whitespace_pattern = re.compile(r'\s+')
+            header_pattern = re.compile(r'(#{1,6})([^#\s])')
+            list_pattern = re.compile(r'(\n\s*)-([^\s])')
+            html_comment_pattern = re.compile(r'<!--.*?-->', re.DOTALL)
+            newline_pattern = re.compile(r'\n{3,}')
             
-            # Fix malformed markdown headers (ensure space after #)
-            cleaned = re.sub(r'(#{1,6})([^#\s])', r'\1 \2', cleaned)
-            
-            # Normalize line breaks
-            cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
-            
-            # Fix broken list formatting
-            cleaned = re.sub(r'(\n\s*)-([^\s])', r'\1- \2', cleaned)
-            
-            # Remove HTML comments
-            cleaned = re.sub(r'<!--.*?-->', '', cleaned, flags=re.DOTALL)
+            # Apply optimizations using pre-compiled patterns
+            cleaned = whitespace_pattern.sub(' ', markdown_content)
+            cleaned = header_pattern.sub(r'\1 \2', cleaned)
+            cleaned = newline_pattern.sub('\n\n', cleaned)
+            cleaned = list_pattern.sub(r'\1- \2', cleaned)
+            cleaned = html_comment_pattern.sub('', cleaned)
             
             # Remove non-breaking spaces and other special characters
             cleaned = cleaned.replace('&nbsp;', ' ')
