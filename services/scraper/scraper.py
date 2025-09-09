@@ -6,7 +6,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import WebDriverException, TimeoutException
+from selenium.common.exceptions import WebDriverException, TimeoutException, StaleElementReferenceException
 from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 import html2text
@@ -20,6 +20,8 @@ import time
 import tempfile
 import uuid
 import os
+import random
+import json
 from core.exceptions import BrowserError
 from core.config import get_settings
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -56,6 +58,197 @@ CLOUDFLARE_BYPASS_FAILURE = Counter('cloudflare_bypass_failure_total', 'Failed C
 
 settings = get_settings()
 
+# Enhanced User Agent Pool for better bot detection evasion
+USER_AGENTS = [
+    # Chrome on Windows
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
+    
+    # Chrome on macOS
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    
+    # Chrome on Linux
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    
+    # Firefox on Windows
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:119.0) Gecko/20100101 Firefox/119.0",
+    
+    # Firefox on macOS
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:120.0) Gecko/20100101 Firefox/120.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:119.0) Gecko/20100101 Firefox/119.0",
+    
+    # Safari on macOS
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Safari/605.1.15",
+]
+
+# Enhanced bot detection patterns
+BOT_DETECTION_PATTERNS = {
+    'cloudflare': [
+        r'cloudflare',
+        r'ray id:',
+        r'please wait while we verify',
+        r'please enable cookies',
+        r'please complete the security check',
+        r'checking your browser',
+        r'just a moment',
+        r'attention required',
+        r'cf-browser-verification',
+        r'cf-challenge-running'
+    ],
+    'datadome': [
+        r'datadome',
+        r'access denied',
+        r'blocked by datadome',
+        r'captcha.*datadome'
+    ],
+    'incapsula': [
+        r'incapsula',
+        r'incap_ses',
+        r'visid_incap',
+        r'blocked by incapsula'
+    ],
+    'akamai': [
+        r'akamai',
+        r'ak-bmsc',
+        r'akamai.*bot.*manager'
+    ],
+    'generic_captcha': [
+        r'captcha',
+        r'recaptcha',
+        r'hcaptcha',
+        r'security check',
+        r'verify.*human'
+    ]
+}
+
+# Enhanced stealth JavaScript for better bot detection evasion
+ENHANCED_STEALTH_JS = """
+    // Remove webdriver property
+    Object.defineProperty(navigator, 'webdriver', {
+        get: () => undefined
+    });
+    
+    // Mock plugins
+    Object.defineProperty(navigator, 'plugins', {
+        get: () => [
+            {
+                name: 'Chrome PDF Plugin',
+                filename: 'internal-pdf-viewer',
+                description: 'Portable Document Format'
+            },
+            {
+                name: 'Chrome PDF Viewer',
+                filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai',
+                description: ''
+            },
+            {
+                name: 'Native Client',
+                filename: 'internal-nacl-plugin',
+                description: ''
+            }
+        ]
+    });
+    
+    // Mock languages
+    Object.defineProperty(navigator, 'languages', {
+        get: () => ['en-US', 'en']
+    });
+    
+    // Mock permissions
+    const originalQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = (parameters) => (
+        parameters.name === 'notifications' ?
+            Promise.resolve({ state: Notification.permission }) :
+            originalQuery(parameters)
+    );
+    
+    // Mock chrome object
+    window.chrome = {
+        runtime: {
+            onConnect: undefined,
+            onMessage: undefined
+        },
+        app: {
+            isInstalled: false,
+            InstallState: {
+                DISABLED: 'disabled',
+                INSTALLED: 'installed',
+                NOT_INSTALLED: 'not_installed'
+            },
+            RunningState: {
+                CANNOT_RUN: 'cannot_run',
+                READY_TO_RUN: 'ready_to_run',
+                RUNNING: 'running'
+            }
+        }
+    };
+    
+    // Hide automation indicators
+    const automationProperties = [
+        '__webdriver_evaluate', '__selenium_evaluate', '__webdriver_script_function',
+        '__webdriver_script_func', '__webdriver_script_fn', '__fxdriver_evaluate',
+        '__driver_unwrapped', '__webdriver_unwrapped', '__driver_evaluate',
+        '__selenium_unwrapped', '__fxdriver_unwrapped', '__webdriver_script_args',
+        '__webdriver_script_result', '__webdriver_script_error'
+    ];
+    
+    automationProperties.forEach(prop => {
+        Object.defineProperty(document, prop, {
+            get: () => undefined,
+            set: () => undefined
+        });
+    });
+    
+    // Mock screen properties
+    Object.defineProperty(screen, 'availHeight', {
+        get: () => 1040
+    });
+    Object.defineProperty(screen, 'availWidth', {
+        get: () => 1920
+    });
+    Object.defineProperty(screen, 'colorDepth', {
+        get: () => 24
+    });
+    Object.defineProperty(screen, 'height', {
+        get: () => 1080
+    });
+    Object.defineProperty(screen, 'width', {
+        get: () => 1920
+    });
+    
+    // Mock timezone
+    Object.defineProperty(Intl.DateTimeFormat.prototype, 'resolvedOptions', {
+        value: function() {
+            return { timeZone: 'America/New_York' };
+        }
+    });
+    
+    // Mock canvas fingerprinting
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function(type) {
+        if (type === '2d') {
+            const context = getContext.call(this, type);
+            const originalFillText = context.fillText;
+            context.fillText = function() {
+                // Add slight randomization to canvas fingerprinting
+                const args = Array.from(arguments);
+                if (args.length >= 3) {
+                    args[1] += Math.random() * 0.1;
+                    args[2] += Math.random() * 0.1;
+                }
+                return originalFillText.apply(this, args);
+            };
+            return context;
+        }
+        return getContext.call(this, type);
+    };
+"""
+
 def with_retry(max_retries: int = 3, delay: float = 1.0):
     """Decorator for retry logic"""
     def decorator(func):
@@ -88,31 +281,70 @@ class ContentExtractor:
     """Enhanced content extraction with better cleaning and extraction logic"""
     
     def __init__(self):
+        # Optimized html2text configuration for top-class markdown output
         self.html2text_handler = html2text.HTML2Text()
         self.html2text_handler.ignore_links = False
-        self.html2text_handler.ignore_images = False
+        self.html2text_handler.ignore_images = False  # Keep images for proper markdown conversion
         self.html2text_handler.ignore_tables = False
-        self.html2text_handler.body_width = 0
+        self.html2text_handler.body_width = 0  # No line wrapping to preserve structure
+        self.html2text_handler.unicode_snob = True  # Better Unicode handling
+        self.html2text_handler.escape_snob = False  # Don't escape to preserve structure
+        self.html2text_handler.mark_code = True  # Mark code blocks properly
+        self.html2text_handler.wrap_links = False  # Don't wrap links
+        self.html2text_handler.wrap_list_items = False  # Don't wrap list items
+        self.html2text_handler.emphasis_mark = '*'  # Use * for emphasis
+        self.html2text_handler.strong_mark = '**'  # Use ** for strong
+        self.html2text_handler.ignore_emphasis = False  # Keep emphasis
+        self.html2text_handler.ignore_anchors = False  # Keep anchors
+        
+        # Pre-compile regex patterns for faster processing
+        import re
+        self._whitespace_pattern = re.compile(r'\s+')
+        self._header_pattern = re.compile(r'(#{1,6})([^#\s])')
+        self._list_pattern = re.compile(r'(\n\s*)-([^\s])')
+        self._html_comment_pattern = re.compile(r'<!--.*?-->', re.DOTALL)
+        self._code_block_pattern = re.compile(r'```(\w+)?\n(.*?)\n```', re.DOTALL)
+        self._inline_code_pattern = re.compile(r'`([^`]+)`')
+        self._excessive_newlines = re.compile(r'\n{3,}')
+        self._trailing_spaces = re.compile(r'[ \t]+$', re.MULTILINE)
     
     def _clean_html(self, html: str) -> str:
-        """Clean HTML content with enhanced filtering"""
+        """Clean HTML content while preserving structure and formatting"""
         try:
-            soup = BeautifulSoup(html, 'html.parser')
+            # Use lxml parser for better performance (faster than html.parser)
+            # Fallback to html.parser if lxml is not available
+            try:
+                soup = BeautifulSoup(html, 'lxml')
+            except Exception:
+                logger.debug("lxml parser not available, falling back to html.parser")
+                soup = BeautifulSoup(html, 'html.parser')
             
-            # Remove unwanted elements
-            for element in soup.find_all([
-                'script', 'style', 'iframe', 'nav', 'footer',
-                'noscript', 'meta', 'link', 'comment'
-            ]):
+            # Remove unwanted elements but preserve structure
+            unwanted_tags = ['script', 'style', 'iframe', 'noscript', 'comment']
+            for element in soup.find_all(unwanted_tags):
                 element.decompose()
             
-            # Clean attributes
+            # Remove navigation and footer but keep main content structure
+            for element in soup.find_all(['nav', 'footer', 'header']):
+                # Only remove if they don't contain main content
+                if not element.find(['main', 'article', 'section']):
+                    element.decompose()
+            
+            # Clean attributes while preserving important structure attributes
+            allowed_attrs = {
+                'href', 'src', 'alt', 'title', 'class', 'id', 'data-*',
+                'role', 'aria-*', 'type', 'rel', 'target'
+            }
             for tag in soup.find_all(True):
-                allowed_attrs = ['href', 'src', 'alt', 'title']
-                attrs = dict(tag.attrs)
-                for attr in attrs:
-                    if attr not in allowed_attrs:
-                        del tag[attr]
+                if tag.attrs:
+                    # Create new attrs dict with only allowed attributes
+                    new_attrs = {}
+                    for attr, value in tag.attrs.items():
+                        if (attr in allowed_attrs or 
+                            attr.startswith('data-') or 
+                            attr.startswith('aria-')):
+                            new_attrs[attr] = value
+                    tag.attrs = new_attrs
             
             return str(soup)
         except Exception as e:
@@ -120,35 +352,133 @@ class ContentExtractor:
             raise
     
     def _extract_metadata(self, soup: BeautifulSoup) -> Dict[str, str]:
-        """Extract comprehensive metadata from HTML"""
+        """Extract comprehensive metadata from HTML matching expected output format"""
         metadata = {}
         
-        # Get title with fallbacks
-        title_tag = (
-            soup.find('meta', property='og:title') or 
-            soup.find('title')
-        )
+        # Extract title
+        title_tag = soup.find('title')
         if title_tag:
-            metadata['title'] = title_tag.get('content', '') or title_tag.string
-            
-        # Get meta tags with prioritized mappings
-        meta_mappings = {
-            'description': ['description', 'og:description'],
-            'language': ['language', 'og:locale'],
-            'author': ['author', 'article:author'],
-            'published_date': ['article:published_time', 'publishedDate'],
-            'keywords': ['keywords'],
-            'image': ['og:image']
-        }
+            metadata['title'] = title_tag.get_text().strip()
         
-        for meta in soup.find_all('meta'):
-            name = meta.get('name') or meta.get('property')
-            content = meta.get('content')
-            
+        # Extract meta description
+        desc_tag = soup.find('meta', attrs={'name': 'description'})
+        if desc_tag:
+            metadata['description'] = desc_tag.get('content', '').strip()
+        
+        # Extract Open Graph data with proper naming
+        og_tags = soup.find_all('meta', attrs={'property': lambda x: x and x.startswith('og:')})
+        for tag in og_tags:
+            prop = tag.get('property', '').replace('og:', '')
+            content = tag.get('content', '').strip()
+            if prop and content:
+                # Map to expected field names
+                if prop == 'title':
+                    metadata['ogTitle'] = content
+                elif prop == 'description':
+                    metadata['ogDescription'] = content
+                elif prop == 'image':
+                    metadata['ogImage'] = content
+                elif prop == 'url':
+                    metadata['ogUrl'] = content
+                elif prop == 'site_name':
+                    metadata['ogSiteName'] = content
+                elif prop == 'type':
+                    metadata['og:type'] = content
+                elif prop == 'locale':
+                    metadata['ogLocale'] = content
+                else:
+                    metadata[f'og{prop.capitalize()}'] = content
+        
+        # Extract Twitter Card data with proper naming
+        twitter_tags = soup.find_all('meta', attrs={'name': lambda x: x and x.startswith('twitter:')})
+        for tag in twitter_tags:
+            name = tag.get('name', '').replace('twitter:', '')
+            content = tag.get('content', '').strip()
             if name and content:
-                for key, possible_names in meta_mappings.items():
-                    if name.lower() in possible_names:
-                        metadata[key] = content.strip()
+                metadata[f'twitter:{name}'] = content
+        
+        # Extract canonical URL
+        canonical = soup.find('link', attrs={'rel': 'canonical'})
+        if canonical:
+            metadata['canonical_url'] = canonical.get('href', '').strip()
+        
+        # Extract favicon
+        favicon = soup.find('link', attrs={'rel': 'icon'}) or soup.find('link', attrs={'rel': 'shortcut icon'})
+        if favicon:
+            metadata['favicon'] = favicon.get('href', '').strip()
+        
+        # Extract additional metadata fields
+        viewport = soup.find('meta', attrs={'name': 'viewport'})
+        if viewport:
+            metadata['viewport'] = viewport.get('content', '').strip()
+        
+        # Extract language
+        html_tag = soup.find('html')
+        if html_tag and html_tag.get('lang'):
+            metadata['language'] = html_tag.get('lang')
+        
+        # Extract charset
+        charset_tag = soup.find('meta', attrs={'charset': True})
+        if charset_tag:
+            metadata['charset'] = charset_tag.get('charset', '').strip()
+        
+        # Extract content type
+        content_type = soup.find('meta', attrs={'http-equiv': 'content-type'})
+        if content_type:
+            metadata['contentType'] = content_type.get('content', '').strip()
+        
+        # Extract author information
+        author_tag = soup.find('meta', attrs={'name': 'author'})
+        if author_tag:
+            metadata['authors'] = author_tag.get('content', '').strip()
+        
+        # Extract summary
+        summary_tag = soup.find('meta', attrs={'name': 'summary'})
+        if summary_tag:
+            metadata['summary'] = summary_tag.get('content', '').strip()
+        
+        # Extract additional fields to match expected output
+        # Extract published date from various sources
+        pub_date = (soup.find('meta', attrs={'property': 'article:published_time'}) or
+                   soup.find('meta', attrs={'name': 'article:published_time'}) or
+                   soup.find('time', attrs={'datetime': True}))
+        if pub_date:
+            if pub_date.get('content'):
+                metadata['published_at'] = pub_date.get('content', '').strip()
+            elif pub_date.get('datetime'):
+                metadata['published_at'] = pub_date.get('datetime', '').strip()
+        
+        # Extract categories/sections
+        category = (soup.find('meta', attrs={'property': 'article:section'}) or
+                   soup.find('meta', attrs={'name': 'article:section'}) or
+                   soup.find('meta', attrs={'property': 'article:tag'}))
+        if category:
+            metadata['categories'] = category.get('content', '').strip()
+        
+        # Extract site ID
+        site_id = soup.find('meta', attrs={'name': 'site-id'})
+        if site_id:
+            metadata['site-id'] = site_id.get('content', '').strip()
+        
+        # Extract app version
+        app_version = soup.find('meta', attrs={'name': 'app-version'})
+        if app_version:
+            metadata['app-version'] = app_version.get('content', '').strip()
+        
+        # Extract author images
+        author_img = soup.find('img', attrs={'alt': re.compile(r'author|writer', re.I)})
+        if author_img:
+            metadata['author_images'] = author_img.get('src', '').strip()
+        
+        # Extract docs boost
+        docs_boost = soup.find('meta', attrs={'name': 'docs-boost'})
+        if docs_boost:
+            metadata['docs-boost'] = docs_boost.get('content', '').strip()
+        
+        # Extract FB app ID
+        fb_app_id = soup.find('meta', attrs={'property': 'fb:app_id'})
+        if fb_app_id:
+            metadata['fb:app_id'] = fb_app_id.get('content', '').strip()
         
         return metadata
 
@@ -174,19 +504,191 @@ class ContentExtractor:
         
         return None
 
-    async def extract_content(self, html: str, only_main: bool = True) -> Dict[str, Any]:
-        """Main content extraction method with error handling"""
+    def _convert_to_markdown_with_images(self, html: str) -> str:
+        """Convert HTML to markdown with enhanced image handling and structure preservation"""
         try:
-            soup = BeautifulSoup(html, 'html.parser')
+            # Parse HTML to extract and enhance images
+            try:
+                soup = BeautifulSoup(html, 'lxml')
+            except Exception:
+                soup = BeautifulSoup(html, 'html.parser')
+            
+            # Enhance image tags for better markdown conversion
+            for img in soup.find_all('img'):
+                # Ensure alt text exists
+                if not img.get('alt'):
+                    img['alt'] = 'Image'
+                
+                # Add title if src exists but no title
+                if img.get('src') and not img.get('title'):
+                    # Extract filename from src for title
+                    src = img.get('src', '')
+                    if src:
+                        filename = src.split('/')[-1].split('?')[0]  # Remove query params
+                        img['title'] = filename
+            
+            # Convert to markdown using optimized html2text
+            markdown = self.html2text_handler.handle(str(soup))
+            
+            # Post-process markdown for better structure preservation
+            markdown = self._post_process_markdown(markdown)
+            
+            return markdown
+            
+        except Exception as e:
+            logger.error(f"Markdown conversion failed: {str(e)}")
+            # Fallback to basic conversion
+            return self.html2text_handler.handle(html)
+
+    def _post_process_markdown(self, markdown: str) -> str:
+        """Post-process markdown to achieve top-class formatting matching expected output"""
+        try:
+            # Remove HTML comments using pre-compiled pattern
+            markdown = self._html_comment_pattern.sub('', markdown)
+            
+            # Remove non-breaking spaces and other special characters
+            markdown = markdown.replace('&nbsp;', ' ')
+            markdown = markdown.replace('\xa0', ' ')
+            markdown = markdown.replace('\u00a0', ' ')
+            
+            # Fix malformed headers using pre-compiled pattern
+            markdown = self._header_pattern.sub(r'\1 \2', markdown)
+            
+            # Fix broken list formatting using pre-compiled pattern
+            markdown = self._list_pattern.sub(r'\1- \2', markdown)
+            
+            # Clean up trailing spaces from each line
+            markdown = self._trailing_spaces.sub('', markdown)
+            
+            # Process lines to improve formatting
+            lines = markdown.split('\n')
+            processed_lines = []
+            in_code_block = False
+            in_list = False
+            
+            for i, line in enumerate(lines):
+                line = line.rstrip()
+                
+                # Handle code blocks
+                if line.startswith('```'):
+                    in_code_block = not in_code_block
+                    processed_lines.append(line)
+                    continue
+                
+                if in_code_block:
+                    processed_lines.append(line)
+                    continue
+                
+                # Handle empty lines
+                if not line.strip():
+                    # Only add empty line if previous line wasn't empty
+                    if processed_lines and processed_lines[-1].strip():
+                        processed_lines.append('')
+                    continue
+                
+                # Handle headers
+                if line.startswith('#'):
+                    # Add spacing before header (except at start)
+                    if processed_lines and processed_lines[-1].strip():
+                        processed_lines.append('')
+                    processed_lines.append(line)
+                    # Add spacing after header
+                    processed_lines.append('')
+                    in_list = False
+                    continue
+                
+                # Handle lists
+                if line.strip().startswith(('-', '*', '+')) or re.match(r'^\s*\d+\.', line):
+                    if not in_list and processed_lines and processed_lines[-1].strip():
+                        processed_lines.append('')
+                    processed_lines.append(line)
+                    in_list = True
+                    continue
+                else:
+                    in_list = False
+                
+                # Handle images
+                if line.strip().startswith('!['):
+                    if processed_lines and processed_lines[-1].strip():
+                        processed_lines.append('')
+                    processed_lines.append(line)
+                    processed_lines.append('')
+                    continue
+                
+                # Handle regular content
+                processed_lines.append(line)
+            
+            markdown = '\n'.join(processed_lines)
+            
+            # Clean up excessive newlines (more than 2 consecutive)
+            markdown = self._excessive_newlines.sub('\n\n', markdown)
+            
+            # Remove lines with only whitespace and single characters
+            markdown = re.sub(r'^\s*[\*\.\-]\s*$', '', markdown, flags=re.MULTILINE)
+            
+            # Clean up any remaining excessive newlines after removing single character lines
+            markdown = self._excessive_newlines.sub('\n\n', markdown)
+            
+            # Fix code block formatting - convert **Copy\n[code] to proper markdown triple backticks
+            # Handle the exact format we see: **Copy\n[code]\n    content\n[/code]
+            markdown = re.sub(r'\*\*Copy\n\[code\]', 'Copy\n\n```', markdown)
+            markdown = re.sub(r'\[/code\]', '```', markdown)
+            
+            # Clean up any remaining [code] or [/code] tags that might be standalone
+            markdown = re.sub(r'\[code\]', '```', markdown)
+            markdown = re.sub(r'\[/code\]', '```', markdown)
+            
+            # Final cleanup - remove any remaining problematic lines and excessive spacing
+            markdown = re.sub(r'^\s*[\*\.\-]\s*$', '', markdown, flags=re.MULTILINE)
+            markdown = self._excessive_newlines.sub('\n\n', markdown)
+            
+            # Ensure proper spacing around code blocks
+            markdown = re.sub(r'(\n*)(```[\w]*\n.*?\n```)(\n*)', r'\n\n\2\n\n', markdown, flags=re.DOTALL)
+            
+            # Ensure proper spacing around images
+            markdown = re.sub(r'(\n*)(!\[.*?\]\(.*?\))(\n*)', r'\n\n\2\n\n', markdown)
+            
+            # Clean up any remaining excessive newlines
+            markdown = self._excessive_newlines.sub('\n\n', markdown)
+            
+            # Final cleanup before returning - remove lines with only asterisks and double empty lines
+            markdown = re.sub(r'^\s*\*\s*$', '', markdown, flags=re.MULTILINE)
+            markdown = re.sub(r'\n{3,}', '\n\n', markdown)
+            
+            return markdown.strip()
+            
+        except Exception as e:
+            logger.error(f"Markdown post-processing failed: {str(e)}")
+            return markdown
+
+    async def extract_content(self, html: str, only_main: bool = True) -> Dict[str, Any]:
+        """Main content extraction method with optimized parsing and image handling"""
+        try:
+            # Use optimized parser (lxml if available, fallback to html.parser)
+            try:
+                soup = BeautifulSoup(html, 'lxml')
+            except Exception:
+                logger.debug("lxml parser not available, using html.parser")
+                soup = BeautifulSoup(html, 'html.parser')
+            
+            # Extract metadata first
             metadata = self._extract_metadata(soup)
             
+            # Find main content if requested
             if only_main:
                 content = self._find_main_content(soup)
                 if content:
-                    html = content
+                    # Re-parse the main content for cleaning
+                    try:
+                        soup = BeautifulSoup(str(content), 'lxml')
+                    except Exception:
+                        soup = BeautifulSoup(str(content), 'html.parser')
             
-            clean_html = self._clean_html(html)
-            markdown = self.html2text_handler.handle(clean_html)
+            # Clean HTML with optimized method
+            clean_html = self._clean_html(str(soup))
+            
+            # Convert to markdown with enhanced image handling
+            markdown = self._convert_to_markdown_with_images(clean_html)
             
             return {
                 'html': clean_html,
@@ -201,10 +703,15 @@ class BrowserContext:
     """Enhanced browser context management with anti-detection and better logging"""
     def __init__(self, browser: webdriver.Chrome, config: Dict[str, Any]):
         logger.info("Initializing new browser context")
-        self.cloudflare_handler = CloudflareHandler()
+        # Use the enhanced bot detection handler
+        self.bot_detection_handler = EnhancedBotDetectionHandler()
+        # Keep backward compatibility
+        self.cloudflare_handler = self.bot_detection_handler
         self.browser = browser
         self.config = config
         self.original_window = browser.current_window_handle
+        # Random user agent for this session
+        self.user_agent = random.choice(USER_AGENTS)
         self._setup_browser()
 
     def _setup_browser(self):
@@ -222,106 +729,19 @@ class BrowserContext:
             self.browser.execute_cdp_cmd('Network.setBypassServiceWorker', {'bypass': True})
             self.browser.execute_cdp_cmd('Page.enable', {})
 
-            # Anti-detection measures
+            # Enhanced anti-detection measures using the new stealth script
             self.browser.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
-                "source": """
-                    Object.defineProperty(navigator, 'webdriver', {
-                        get: () => undefined
-                    });
-                    Object.defineProperty(navigator, 'plugins', {
-                        get: () => [1, 2, 3, 4, 5]
-                    });
-                    Object.defineProperty(navigator, 'languages', {
-                        get: () => ['en-US', 'en']
-                    });
-                    window.chrome = {
-                        runtime: {}
-                    };
-                    
-                    // Hide automation-related properties
-                    const automationProperties = ['__webdriver_evaluate', '__selenium_evaluate',
-                        '__webdriver_script_function', '__webdriver_script_func', '__webdriver_script_fn',
-                        '__fxdriver_evaluate', '__driver_unwrapped', '__webdriver_unwrapped',
-                        '__driver_evaluate', '__selenium_unwrapped', '__fxdriver_unwrapped'];
-                    
-                    automationProperties.forEach(prop => {
-                        Object.defineProperty(document, prop, {
-                            get: () => undefined,
-                            set: () => undefined
-                        });
-                    });
-                """
+                "source": ENHANCED_STEALTH_JS
             })
 
-            # Set realistic user agent and platform
+            # Set random user agent and platform based on the user agent
+            platform = self._get_platform_from_user_agent(self.user_agent)
             self.browser.execute_cdp_cmd('Network.setUserAgentOverride', {
-                "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                "platform": "Windows"
+                "userAgent": self.user_agent,
+                "platform": platform
             })
-
-            stealth_js = """
-                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                    
-                    window.chrome = {
-                        app: {
-                            isInstalled: false,
-                            InstallState: {
-                                DISABLED: 'disabled',
-                                INSTALLED: 'installed',
-                                NOT_INSTALLED: 'not_installed'
-                            },
-                            RunningState: {
-                                CANNOT_RUN: 'cannot_run',
-                                READY_TO_RUN: 'ready_to_run',
-                                RUNNING: 'running'
-                            }
-                        },
-                        runtime: {
-                            OnInstalledReason: {
-                                CHROME_UPDATE: 'chrome_update',
-                                INSTALL: 'install',
-                                SHARED_MODULE_UPDATE: 'shared_module_update',
-                                UPDATE: 'update'
-                            },
-                            OnRestartRequiredReason: {
-                                APP_UPDATE: 'app_update',
-                                OS_UPDATE: 'os_update',
-                                PERIODIC: 'periodic'
-                            },
-                            PlatformArch: {
-                                ARM: 'arm',
-                                ARM64: 'arm64',
-                                MIPS: 'mips',
-                                MIPS64: 'mips64',
-                                X86_32: 'x86-32',
-                                X86_64: 'x86-64'
-                            },
-                            PlatformNaclArch: {
-                                ARM: 'arm',
-                                MIPS: 'mips',
-                                MIPS64: 'mips64',
-                                X86_32: 'x86-32',
-                                X86_64: 'x86-64'
-                            },
-                            PlatformOs: {
-                                ANDROID: 'android',
-                                CROS: 'cros',
-                                LINUX: 'linux',
-                                MAC: 'mac',
-                                OPENBSD: 'openbsd',
-                                WIN: 'win'
-                            },
-                            RequestUpdateCheckStatus: {
-                                NO_UPDATE: 'no_update',
-                                THROTTLED: 'throttled',
-                                UPDATE_AVAILABLE: 'update_available'
-                            }
-                        }
-                    };
-                """
-            self.browser.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
-                'source': stealth_js
-            })
+            logger.info(f"Set user agent: {self.user_agent[:50]}...")
+            logger.info(f"Set platform: {platform}")
 
             # Add stealth mode headers
             self.browser.execute_cdp_cmd('Network.setExtraHTTPHeaders', {
@@ -350,24 +770,48 @@ class BrowserContext:
             logger.error(f"Failed to setup browser: {str(e)}")
             raise
 
-    async def navigate(self, url: str, timeout: int = 30):
-        """Enhanced navigation with Cloudflare handling"""
-        logger.info(f"Navigating to URL: {url}")
+    def _get_platform_from_user_agent(self, user_agent: str) -> str:
+        """Extract platform from user agent string"""
+        user_agent_lower = user_agent.lower()
+        if 'windows' in user_agent_lower:
+            return 'Windows'
+        elif 'macintosh' in user_agent_lower or 'mac os x' in user_agent_lower:
+            return 'Mac'
+        elif 'linux' in user_agent_lower:
+            return 'Linux'
+        elif 'android' in user_agent_lower:
+            return 'Android'
+        elif 'iphone' in user_agent_lower or 'ipad' in user_agent_lower:
+            return 'iOS'
+        else:
+            return 'Windows'  # Default fallback
+
+    async def navigate(self, url: str, timeout: int = 10):  # Reduced default timeout
+        """Ultra-fast navigation optimized for speed"""
+        logger.info(f"Fast navigation to URL: {url}")
         start_time = time.time()
         
         try:
+            # Set aggressive page load timeout for speed
             self.browser.set_page_load_timeout(timeout)
+            
+            # Use eager loading strategy for faster page loads
+            self.browser.execute_cdp_cmd('Page.setLifecycleEventsEnabled', {'enabled': True})
+            
+            # Navigate with minimal wait
             self.browser.get(url)
             
-            # Check for Cloudflare
-            if await self.cloudflare_handler.is_cloudflare_challenge(self.browser):
-                logger.info("Detected Cloudflare challenge, waiting for completion")
-                challenge_complete = await self.cloudflare_handler.wait_for_challenge_completion(
+            # Check for bot protection systems
+            bot_detection = await self.bot_detection_handler.detect_bot_protection(self.browser)
+            if bot_detection['detected']:
+                logger.info(f"Detected {bot_detection['type']} protection with confidence {bot_detection['confidence']}")
+                CLOUDFLARE_CHALLENGES.inc()
+                challenge_complete = await self.bot_detection_handler.wait_for_challenge_completion(
                     self.browser,
                     timeout=timeout
                 )
                 if not challenge_complete:
-                    raise Exception("Failed to bypass Cloudflare challenge")
+                    raise Exception(f"Failed to bypass {bot_detection['type']} challenge")
             
             await self._wait_for_network_idle()
             logger.info(f"Navigation completed in {time.time() - start_time:.2f}s")
@@ -379,14 +823,17 @@ class BrowserContext:
                 self.browser.set_page_load_timeout(timeout * 2)
                 self.browser.get(url)
                 
-                # Check for Cloudflare again after retry
-                if await self.cloudflare_handler.is_cloudflare_challenge(self.browser):
-                    challenge_complete = await self.cloudflare_handler.wait_for_challenge_completion(
+                # Check for bot protection again after retry
+                bot_detection = await self.bot_detection_handler.detect_bot_protection(self.browser)
+                if bot_detection['detected']:
+                    logger.info(f"Detected {bot_detection['type']} protection after retry")
+                    CLOUDFLARE_CHALLENGES.inc()
+                    challenge_complete = await self.bot_detection_handler.wait_for_challenge_completion(
                         self.browser,
                         timeout=timeout
                     )
                     if not challenge_complete:
-                        raise Exception("Failed to bypass Cloudflare challenge")
+                        raise Exception(f"Failed to bypass {bot_detection['type']} challenge")
                         
                 await self._wait_for_network_idle()
                 logger.info(f"Navigation completed after retry in {time.time() - start_time:.2f}s")
@@ -394,41 +841,48 @@ class BrowserContext:
                 logger.error(f"Navigation failed even after retry: {str(e)}")
                 raise
 
-    async def _wait_for_network_idle(self, idle_time: float = 1.0, timeout: float = 10.0):
-        """Wait for network activity to settle with detailed logging"""
-        logger.debug("Waiting for network to become idle")
+    async def _wait_for_network_idle(self, idle_time: float = 0.1, timeout: float = 2.0):
+        """Ultra-fast network idle wait optimized for speed"""
+        logger.debug("Fast network idle check")
         try:
             start_time = time.time()
+            
+            # Simple DOM ready check instead of complex network monitoring
             script = """
                 return new Promise((resolve) => {
-                    let lastCount = performance.getEntriesByType('resource').length;
-                    let checkCount = 0;
-                    const interval = setInterval(() => {
-                        const currentCount = performance.getEntriesByType('resource').length;
-                        if (currentCount === lastCount) {
-                            checkCount++;
-                            if (checkCount >= 3) {
-                                clearInterval(interval);
-                                resolve({
-                                    resourceCount: currentCount,
-                                    timeElapsed: performance.now()
-                                });
+                    if (document.readyState === 'complete') {
+                        resolve({ready: true, timeElapsed: 0});
+                    } else {
+                        const start = performance.now();
+                        const checkReady = () => {
+                            if (document.readyState === 'complete' || 
+                                document.readyState === 'interactive') {
+                                resolve({ready: true, timeElapsed: performance.now() - start});
+                            } else {
+                                setTimeout(checkReady, 50); // Check every 50ms
                             }
-                        } else {
-                            checkCount = 0;
-                            lastCount = currentCount;
-                        }
-                    }, 333);
+                        };
+                        checkReady();
+                    }
                 });
             """
+            
             result = await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: self.browser.execute_script(script)
             )
-            logger.debug(f"Network idle achieved. Resources loaded: {result.get('resourceCount', 'unknown')}")
-            logger.debug(f"Network idle wait took {time.time() - start_time:.2f}s")
+            
+            elapsed = time.time() - start_time
+            logger.debug(f"DOM ready in {elapsed:.3f}s")
+            
+            # Minimal additional wait for any remaining resources
+            if elapsed < 0.5:  # If DOM loaded quickly, wait a bit more
+                await asyncio.sleep(0.2)
+            
         except Exception as e:
-            logger.warning(f"Error waiting for network idle: {str(e)}")
+            logger.warning(f"Error in fast network check: {str(e)}")
+            # Fallback: just wait a minimal time
+            await asyncio.sleep(0.3)
 
     async def get_page_source(self) -> str:
         """Get page source with retry mechanism and logging"""
@@ -482,8 +936,8 @@ class BrowserContext:
             logger.warning(f"Cleanup error: {str(e)}")
 
 class BrowserPool:
-    """Enhanced browser pool management"""
-    def __init__(self, max_browsers: int = 3):
+    """Ultra-fast browser pool management optimized for speed"""
+    def __init__(self, max_browsers: int = 10):  # Increased pool size
         self.max_browsers = max_browsers
         self.available_browsers: List[webdriver.Chrome] = []
         self.active_browsers: Set[webdriver.Chrome] = set()
@@ -494,34 +948,71 @@ class BrowserPool:
             'failed': 0,
             'current_active': 0
         }
+        # Cache ChromeDriver service for faster browser creation
+        self._cached_service = None
 
     def _create_browser_options(self) -> Options:
-        """Create optimized browser options"""
+        """Create balanced browser options for speed while maintaining structure"""
         options = Options()
         
-        # Performance-focused options
+        # Core performance options
         options.add_argument('--headless=new')
         options.add_argument('--disable-gpu')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--disable-extensions')
+        options.add_argument('--disable-plugins')
         
-        # Memory optimization
-        options.add_argument('--disable-javascript')
-        options.add_argument('--blink-settings=imagesEnabled=false')
-        options.add_argument('--js-flags=--max-old-space-size=512')
+        # Network and loading optimizations
+        options.add_argument('--disable-background-networking')
+        options.add_argument('--disable-background-timer-throttling')
+        options.add_argument('--disable-renderer-backgrounding')
+        options.add_argument('--disable-backgrounding-occluded-windows')
+        options.add_argument('--disable-features=TranslateUI')
+        options.add_argument('--disable-ipc-flooding-protection')
+        options.add_argument('--disable-hang-monitor')
+        options.add_argument('--disable-prompt-on-repost')
+        options.add_argument('--disable-domain-reliability')
+        options.add_argument('--disable-component-extensions-with-background-pages')
         
-        # Network optimization
-        options.add_argument('--disable-features=NetworkService')
-        options.add_argument('--dns-prefetch-disable')
+        # Memory and CPU optimizations
+        options.add_argument('--memory-pressure-off')
+        options.add_argument('--max_old_space_size=4096')
+        options.add_argument('--js-flags=--max-old-space-size=4096')
+        options.add_argument('--disable-background-mode')
+        options.add_argument('--disable-low-res-tiling')
         
-        # Additional stability options
-        options.add_argument('--disable-popup-blocking')
-        options.add_argument('--disable-notifications')
-        options.add_argument('--disable-infobars')
+        # Balanced loading strategy - keep structure but optimize speed
+        options.add_argument('--page-load-strategy=normal')  # Wait for DOM but not all resources
+        options.add_argument('--disable-web-security')
+        options.add_argument('--disable-features=VizDisplayCompositor')
         
-        # Set specific capabilities
-        options.set_capability('goog:loggingPrefs', {'browser': 'ALL'})
+        # Window size for proper rendering
+        options.add_argument('--window-size=1280,720')
+        
+        # Minimal logging
+        options.add_argument('--log-level=3')
+        options.add_argument('--silent')
+        
+        # Balanced prefs - allow JS and CSS for structure, but optimize images
+        prefs = {
+            "profile.default_content_setting_values": {
+                "notifications": 2,
+                "geolocation": 2,
+                "media_stream": 2,
+                "images": 1,  # Allow images but optimize loading
+                "plugins": 2,  # Block plugins
+                "popups": 2,  # Block popups
+                "javascript": 1  # Allow JavaScript for proper structure
+            },
+            "profile.managed_default_content_settings": {
+                "images": 1  # Allow images
+            },
+            "profile.default_content_settings": {
+                "images": 1  # Allow images
+            }
+        }
+        options.add_experimental_option("prefs", prefs)
         
         return options
 
@@ -552,17 +1043,21 @@ class BrowserPool:
                 if len(self.active_browsers) < self.max_browsers:
                     logger.info("Creating new browser instance")
                     options = self._create_browser_options()
-                    service = Service(ChromeDriverManager().install())
+                    
+                    # Use cached service for faster browser creation
+                    if not self._cached_service:
+                        logger.info("Initializing cached ChromeDriver service")
+                        self._cached_service = Service(ChromeDriverManager().install())
                     
                     try:
-                        browser = webdriver.Chrome(service=service, options=options)
+                        browser = webdriver.Chrome(service=self._cached_service, options=options)
                         self.active_browsers.add(browser)
                         self.browser_metrics['created'] += 1
                         self.browser_metrics['current_active'] = len(self.active_browsers)
                         logger.info(f"Created new browser {id(browser)}")
                         return BrowserContext(browser, {
                             'window_width': 1280,
-                            'window_height': 1024
+                            'window_height': 720  # Match optimized window size
                         })
                     except Exception as e:
                         self.browser_metrics['failed'] += 1
@@ -668,7 +1163,7 @@ class BrowserPool:
             logger.info("Browser pool cleanup completed")
 
 class WebScraper:
-    def __init__(self, max_concurrent: int = 5):
+    def __init__(self, max_concurrent: int = 10):  # Increased concurrency
         # Core components initialization
         # self.browser_manager = BrowserManager(max_browsers=max_concurrent)
         self.browser_pool = BrowserPool(max_browsers=max_concurrent)
@@ -680,7 +1175,7 @@ class WebScraper:
         self.active_browsers = set()
     
     @classmethod
-    async def create(cls, max_concurrent: int = 5, cache_service: Optional[CacheService] = None) -> 'WebScraper':
+    async def create(cls, max_concurrent: int = 10, cache_service: Optional[CacheService] = None) -> 'WebScraper':
         """Factory method for creating WebScraper instance with optional cache service"""
         instance = cls(max_concurrent=max_concurrent)
         instance.cache_service = cache_service  # Set the cache service
@@ -691,7 +1186,8 @@ class WebScraper:
     async def _get_page_content(self, url: str, options: Dict[str, Any]) -> Dict[str, Any]:
         context = await self.browser_pool.get_browser()
         try:
-            await context.navigate(url, timeout=options.get('timeout', 30))
+            # Use faster timeout for speed
+            await context.navigate(url, timeout=options.get('timeout', 10))
             
             if options.get('wait_for_selector'):
                 element_present = EC.presence_of_element_located(
@@ -862,109 +1358,347 @@ class WebScraper:
         """Cleanup resources"""
         await self.browser_pool.cleanup()
 
-class CloudflareHandler:
+class EnhancedBotDetectionHandler:
+    """Enhanced bot detection and challenge handling for multiple protection systems"""
+    
     def __init__(self):
+        # Cloudflare-specific selectors
+        self.cf_challenge_selectors = [
+            "#challenge-form",
+            "#challenge-running", 
+            "div[class*='cf-browser-verification']",
+            "#cf-challenge-running",
+            ".cf-browser-verification",
+            "#cf-challenge-stage",
+            ".cf-checking-browser",
+            ".cf-wrapper"
+        ]
+        
+        # Generic challenge selectors
+        self.generic_challenge_selectors = [
+            "[class*='captcha']",
+            "[class*='challenge']",
+            "[class*='verification']",
+            "[class*='security-check']",
+            "iframe[src*='recaptcha']",
+            "iframe[src*='hcaptcha']",
+            ".g-recaptcha",
+            ".h-captcha"
+        ]
+        
+        # DataDome selectors
+        self.datadome_selectors = [
+            "[class*='datadome']",
+            "[id*='datadome']",
+            ".dd-challenge"
+        ]
+        
+        # Incapsula selectors
+        self.incapsula_selectors = [
+            "[class*='incap']",
+            "[id*='incap']",
+            ".incap-challenge"
+        ]
+
+    async def detect_bot_protection(self, browser: webdriver.Chrome) -> Dict[str, Any]:
+        """Comprehensive bot protection detection"""
+        detection_result = {
+            'detected': False,
+            'type': None,
+            'confidence': 0,
+            'selectors_found': [],
+            'text_indicators': [],
+            'page_title': None
+        }
+        
+        try:
+            # Get page title and source
+            title = browser.title.lower()
+            page_source = browser.page_source.lower()
+            detection_result['page_title'] = title
+            
+            # Check for each protection system
+            protection_systems = [
+                ('cloudflare', self.cf_challenge_selectors, BOT_DETECTION_PATTERNS['cloudflare']),
+                ('datadome', self.datadome_selectors, BOT_DETECTION_PATTERNS['datadome']),
+                ('incapsula', self.incapsula_selectors, BOT_DETECTION_PATTERNS['incapsula']),
+                ('akamai', [], BOT_DETECTION_PATTERNS['akamai']),
+                ('generic_captcha', self.generic_challenge_selectors, BOT_DETECTION_PATTERNS['generic_captcha'])
+            ]
+            
+            max_confidence = 0
+            detected_type = None
+            
+            for system_name, selectors, patterns in protection_systems:
+                confidence = 0
+                found_selectors = []
+                found_text = []
+                
+                # Check selectors
+                for selector in selectors:
+                    try:
+                        if browser.find_element(By.CSS_SELECTOR, selector):
+                            found_selectors.append(selector)
+                            confidence += 20
+                    except:
+                        continue
+                
+                # Check text patterns
+                for pattern in patterns:
+                    if re.search(pattern, page_source, re.IGNORECASE):
+                        found_text.append(pattern)
+                        confidence += 15
+                
+                # Check title patterns
+                if system_name == 'cloudflare':
+                    if any(phrase in title for phrase in ['just a moment', 'attention required', 'checking your browser']):
+                        confidence += 25
+                        found_text.append('title_indicator')
+                
+                if confidence > max_confidence:
+                    max_confidence = confidence
+                    detected_type = system_name
+                    detection_result['selectors_found'] = found_selectors
+                    detection_result['text_indicators'] = found_text
+            
+            if max_confidence > 30:  # Threshold for detection
+                detection_result['detected'] = True
+                detection_result['type'] = detected_type
+                detection_result['confidence'] = max_confidence
+                logger.info(f"Detected {detected_type} protection with confidence {max_confidence}")
+            
+            return detection_result
+            
+        except Exception as e:
+            logger.error(f"Error in bot protection detection: {e}")
+            return detection_result
+
+    async def is_cloudflare_challenge(self, browser: webdriver.Chrome) -> bool:
+        """Check if page has Cloudflare challenge (backward compatibility)"""
+        detection = await self.detect_bot_protection(browser)
+        return detection['detected'] and detection['type'] == 'cloudflare'
+            
+    async def solve_cloudflare_challenge(self, browser: webdriver.Chrome) -> bool:
+        """Enhanced Cloudflare challenge solving with multiple strategies"""
+        logger.info("Attempting to solve Cloudflare challenge")
+        try:
+            # Strategy 1: Handle iframe-based challenges
+            try:
+                iframe_selectors = [
+                    "iframe[title*='challenge']",
+                    "iframe[src*='challenge']",
+                    "iframe[src*='cloudflare']",
+                    "iframe[src*='cf-challenge']"
+                ]
+                
+                for iframe_selector in iframe_selectors:
+                    try:
+                        iframe = WebDriverWait(browser, 3).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, iframe_selector))
+                        )
+                        browser.switch_to.frame(iframe)
+                        logger.info(f"Switched to iframe: {iframe_selector}")
+                        
+                        # Look for checkbox in iframe
+                        checkbox_selectors = [
+                            "input[type='checkbox']",
+                            ".checkbox",
+                            "[class*='checkbox']",
+                            "#challenge-form input",
+                            ".cf-turnstile"
+                        ]
+                        
+                        for checkbox_selector in checkbox_selectors:
+                            try:
+                                checkbox = WebDriverWait(browser, 2).until(
+                                    EC.element_to_be_clickable((By.CSS_SELECTOR, checkbox_selector))
+                                )
+                                if checkbox.is_displayed():
+                                    # Human-like delay before clicking
+                                    await asyncio.sleep(random.uniform(0.5, 1.5))
+                                    checkbox.click()
+                                    logger.info(f"Clicked challenge checkbox: {checkbox_selector}")
+                                    break
+                            except:
+                                continue
+                        
+                        browser.switch_to.default_content()
+                        break
+                    except:
+                        continue
+            except:
+                pass
+
+            # Strategy 2: Handle direct page challenges
+            checkbox_selectors = [
+                "input[type='checkbox']",
+                ".checkbox",
+                "[class*='checkbox']",
+                "#challenge-form input",
+                ".cf-turnstile",
+                "[data-ray]",
+                ".cf-challenge-running input"
+            ]
+            
+            for checkbox_selector in checkbox_selectors:
+                try:
+                    checkbox = WebDriverWait(browser, 2).until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, checkbox_selector))
+                    )
+                    if checkbox.is_displayed():
+                        # Human-like delay before clicking
+                        await asyncio.sleep(random.uniform(0.5, 1.5))
+                        checkbox.click()
+                        logger.info(f"Clicked direct challenge checkbox: {checkbox_selector}")
+                        break
+                except:
+                    continue
+
+            # Strategy 3: Handle Turnstile challenges
+            try:
+                turnstile_elements = browser.find_elements(By.CSS_SELECTOR, ".cf-turnstile, [data-sitekey]")
+                if turnstile_elements:
+                    logger.info("Detected Turnstile challenge - waiting for automatic completion")
+                    # Turnstile usually completes automatically, just wait
+                    await asyncio.sleep(3)
+            except:
+                pass
+
+            # Strategy 4: Simulate human behavior
+            try:
+                # Random mouse movements and scrolling
+                browser.execute_script("window.scrollTo(0, Math.random() * 100);")
+                await asyncio.sleep(random.uniform(0.5, 1.0))
+                browser.execute_script("window.scrollTo(0, 0);")
+            except:
+                pass
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error solving Cloudflare challenge: {e}")
+            return False
+
+    async def solve_generic_captcha(self, browser: webdriver.Chrome) -> bool:
+        """Handle generic captcha challenges"""
+        logger.info("Attempting to solve generic captcha challenge")
+        try:
+            # Look for reCAPTCHA
+            recaptcha_selectors = [
+                ".g-recaptcha",
+                "iframe[src*='recaptcha']",
+                "[data-sitekey]"
+            ]
+            
+            for selector in recaptcha_selectors:
+                try:
+                    element = browser.find_element(By.CSS_SELECTOR, selector)
+                    if element.is_displayed():
+                        logger.info("Detected reCAPTCHA - waiting for manual completion")
+                        # For reCAPTCHA, we typically need to wait for manual intervention
+                        # or use a solving service
+                        await asyncio.sleep(5)
+                        return True
+                except:
+                    continue
+            
+            # Look for hCaptcha
+            hcaptcha_selectors = [
+                ".h-captcha",
+                "iframe[src*='hcaptcha']"
+            ]
+            
+            for selector in hcaptcha_selectors:
+                try:
+                    element = browser.find_element(By.CSS_SELECTOR, selector)
+                    if element.is_displayed():
+                        logger.info("Detected hCaptcha - waiting for manual completion")
+                        await asyncio.sleep(5)
+                        return True
+                except:
+                    continue
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error solving generic captcha: {e}")
+            return False
+
+    async def solve_challenge(self, browser: webdriver.Chrome, challenge_type: str = None) -> bool:
+        """Generic challenge solving method that routes to specific handlers"""
+        if not challenge_type:
+            detection = await self.detect_bot_protection(browser)
+            challenge_type = detection.get('type', 'cloudflare')
+        
+        logger.info(f"Attempting to solve {challenge_type} challenge")
+        
+        if challenge_type == 'cloudflare':
+            return await self.solve_cloudflare_challenge(browser)
+        elif challenge_type in ['generic_captcha', 'recaptcha', 'hcaptcha']:
+            return await self.solve_generic_captcha(browser)
+        else:
+            # For other protection systems, try generic approach
+            logger.info(f"No specific handler for {challenge_type}, trying generic approach")
+            return await self.solve_cloudflare_challenge(browser)
+
+    async def wait_for_challenge_completion(self, browser: webdriver.Chrome, timeout: int = 30) -> bool:
+        """Enhanced challenge completion waiting with better detection"""
+        logger.info("Waiting for challenge completion")
+        start_time = time.time()
+        solve_attempts = 0
+        last_detection = None
+        
+        try:
+            while time.time() - start_time < timeout:
+                # Check if challenge is still present
+                detection = await self.detect_bot_protection(browser)
+                
+                if not detection['detected']:
+                    logger.info("Challenge completed successfully")
+                    CLOUDFLARE_BYPASS_SUCCESS.inc()
+                    return True
+                
+                # If challenge type changed, update our approach
+                if last_detection and last_detection.get('type') != detection.get('type'):
+                    logger.info(f"Challenge type changed from {last_detection.get('type')} to {detection.get('type')}")
+                    solve_attempts = 0  # Reset attempts for new challenge type
+                
+                last_detection = detection
+                
+                # Attempt to solve challenge
+                if solve_attempts < 5:  # Increased max attempts
+                    success = await self.solve_challenge(browser, detection.get('type'))
+                    solve_attempts += 1
+                    logger.info(f"Challenge solve attempt {solve_attempts} for {detection.get('type')}")
+                    
+                    if success:
+                        # Wait a bit after solving attempt
+                        await asyncio.sleep(random.uniform(2, 4))
+                
+                # Progressive wait times
+                wait_time = min(2 + (solve_attempts * 0.5), 5)
+                await asyncio.sleep(wait_time)
+            
+            logger.warning(f"Challenge timeout after {timeout}s")
+            CLOUDFLARE_BYPASS_FAILURE.inc()
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error waiting for challenge completion: {e}")
+            CLOUDFLARE_BYPASS_FAILURE.inc()
+            return False
+
+# Backward compatibility - keep the old CloudflareHandler class
+class CloudflareHandler(EnhancedBotDetectionHandler):
+    """Backward compatibility wrapper for the old CloudflareHandler"""
+    
+    def __init__(self):
+        super().__init__()
+        # Keep the old selectors for backward compatibility
         self.cf_challenge_selectors = [
             "#challenge-form",
             "#challenge-running",
             "div[class*='cf-browser-verification']",
             "#cf-challenge-running"
         ]
-
-    async def is_cloudflare_challenge(self, browser: webdriver.Chrome) -> bool:
-        """Check if page has Cloudflare challenge"""
-        try:
-            # Check page title first
-            title = browser.title.lower()
-            if "just a moment" in title or "attention required" in title:
-                logger.info("Detected Cloudflare challenge page by title")
-                return True
-                
-            # Check for challenge elements
-            for selector in self.cf_challenge_selectors:
-                try:
-                    if browser.find_element(By.CSS_SELECTOR, selector):
-                        logger.info(f"Detected Cloudflare challenge element: {selector}")
-                        return True
-                except:
-                    continue
-                    
-            # Check page source for common Cloudflare text
-            page_source = browser.page_source.lower()
-            cf_indicators = [
-                "cloudflare",
-                "ray id:",
-                "please wait while we verify",
-                "please enable cookies",
-                "please complete the security check"
-            ]
-            
-            for indicator in cf_indicators:
-                if indicator in page_source:
-                    logger.info(f"Detected Cloudflare challenge by text: {indicator}")
-                    return True
-                    
-            return False
-            
-        except Exception as e:
-            logger.error(f"Error checking Cloudflare challenge: {e}")
-            return False
-            
-    async def solve_challenge(self, browser: webdriver.Chrome) -> bool:
-        logger.info("Attempting to solve Cloudflare challenge")
-        try:
-            # Wait for iframe if it exists
-            try:
-                iframe = WebDriverWait(browser, 5).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "iframe[title*='challenge']"))
-                )
-                browser.switch_to.frame(iframe)
-            except:
-                pass
-
-            # Try to find and click the checkbox
-            try:
-                checkbox = WebDriverWait(browser, 5).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='checkbox'], .checkbox"))
-                )
-                if checkbox.is_displayed():
-                    checkbox.click()
-                    logger.info("Clicked challenge checkbox")
-            except:
-                pass
-
-            # Switch back to main content
-            browser.switch_to.default_content()
-            
-            return True
-        except Exception as e:
-            logger.error(f"Error solving challenge: {e}")
-            return False
-
-    async def wait_for_challenge_completion(self, browser: webdriver.Chrome, timeout: int = 30) -> bool:
-        """Modified to actively solve challenge"""
-        logger.info("Waiting for Cloudflare challenge completion")
-        start_time = time.time()
-        solve_attempts = 0
-        
-        try:
-            while time.time() - start_time < timeout:
-                if not await self.is_cloudflare_challenge(browser):
-                    logger.info("Cloudflare challenge completed")
-                    return True
-                
-                # Attempt to solve every 5 seconds
-                if solve_attempts < 3:  # Limit solve attempts
-                    await self.solve_challenge(browser)
-                    solve_attempts += 1
-                    logger.info(f"Challenge solve attempt {solve_attempts}")
-                
-                await asyncio.sleep(2)
-            
-            logger.warning("Cloudflare challenge timeout")
-            return False
-            
-        except Exception as e:
-            logger.error(f"Error waiting for challenge completion: {e}")
-            return False
 
