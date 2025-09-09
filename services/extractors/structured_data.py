@@ -102,9 +102,13 @@ class StructuredDataExtractor:
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     def extract_all(self, html: str) -> Dict[str, Any]:
-        """Extract and validate all structured data from HTML"""
+        """Extract and validate all structured data from HTML with optimized parsing"""
         try:
-            soup = BeautifulSoup(html, 'html.parser')
+            # Use lxml parser for better performance, fallback to html.parser
+            try:
+                soup = BeautifulSoup(html, 'lxml')
+            except Exception:
+                soup = BeautifulSoup(html, 'html.parser')
             
             data = {
                 'jsonLd': self.extract_json_ld(soup),
