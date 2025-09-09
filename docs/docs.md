@@ -20,12 +20,6 @@ eGet is a production-grade, ultra-fast web scraping framework designed specifica
 
 The framework excels at handling JavaScript-rendered pages, dynamic content, and complex web applications while delivering clean, structured markdown output that's perfect for RAG applications. With its intelligent content extraction, advanced bot detection bypass, and crawling capabilities, eGet helps developers build comprehensive knowledge bases by efficiently transforming web content into high-quality training data.
 
-**Key Performance Metrics:**
-- ⚡ **Ultra-fast scraping**: 0.009-0.015 seconds for cached URLs
-- 🚀 **New URL performance**: ~3-5 seconds (meets 3-second target)
-- 🛡️ **Bot detection bypass**: Cloudflare, DataDome, Incapsula, Akamai
-- 📊 **99.95% speed improvement**: From 22 seconds to ~0.01 seconds
-
 ## Features
 
 ### Core Capabilities
